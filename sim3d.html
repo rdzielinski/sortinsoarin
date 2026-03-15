@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Soarin' — 3D Operations Simulator</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#06060f;font-family:'IBM Plex Mono',monospace;color:#c0c8dc}
+canvas{display:block;width:100%;height:100%}
+
+#hud{position:fixed;inset:0;pointer-events:none;z-index:10;display:flex;flex-direction:column;justify-content:space-between}
+
+#topbar{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;pointer-events:auto;
+  background:linear-gradient(180deg,rgba(6,6,15,.92) 0%,rgba(6,6,15,.6) 80%,transparent 100%)}
+#topbar h1{font-family:'Syne',sans-serif;font-weight:800;font-size:15px;letter-spacing:2.5px;text-transform:uppercase;
+  background:linear-gradient(90deg,#4da6ff,#5ce0b8,#ffb347);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+#topbar .stats{display:flex;gap:20px;font-size:11px;font-weight:500;opacity:.85}
+#topbar .stats span{color:#5ce0b8;font-weight:700}
+
+#cards{display:flex;gap:10px;padding:0 20px;justify-content:center;pointer-events:auto;margin-top:-4px}
+.tcard{flex:0 0 180px;background:rgba(12,12,28,.8);border:1px solid rgba(255,255,255,.06);border-radius:10px;
+  padding:10px 12px;backdrop-filter:blur(12px);transition:border-color .3s,box-shadow .3s}
+.tcard.active{border-color:var(--tc);box-shadow:0 0 20px color-mix(in srgb,var(--tc) 25%,transparent)}
+.tcard-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.tcard-label{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:var(--tc)}
+.tcard-state{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;padding:2px 6px;border-radius:4px;
+  background:rgba(255,255,255,.06)}
+.tcard-state.idle{color:#5a6080}
+.tcard-state.loading{color:#ffb347;background:rgba(255,179,71,.1)}
+.tcard-state.riding{color:#5ce0b8;background:rgba(92,224,184,.1);animation:pulse-glow 1.5s ease infinite}
+.tcard-state.unloading{color:#c084fc;background:rgba(192,132,252,.1)}
+.tcard-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:6px;overflow:hidden}
+.tcard-fill{height:100%;border-radius:2px;background:var(--tc);transition:width .4s ease}
+.tcard-info{font-size:10px;opacity:.55;margin-top:4px;display:flex;justify-content:space-between}
+
+@keyframes pulse-glow{0%,100%{opacity:1}50%{opacity:.7}}
+
+#controls{display:flex;align-items:center;justify-content:center;gap:10px;padding:14px 20px;pointer-events:auto;
+  background:linear-gradient(0deg,rgba(6,6,15,.92) 0%,rgba(6,6,15,.6) 80%,transparent 100%)}
+
+button{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:8px 16px;border:1px solid rgba(255,255,255,.1);
+  border-radius:6px;background:rgba(255,255,255,.04);color:#c0c8dc;cursor:pointer;transition:all .15s;letter-spacing:.5px}
+button:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2)}
+
+#btn-dispatch{background:rgba(77,166,255,.12);border-color:rgba(77,166,255,.3);color:#4da6ff}
+#btn-dispatch:hover{background:rgba(77,166,255,.2)}
+#btn-auto{transition:all .2s}
+#btn-auto.on{background:rgba(92,224,184,.12);border-color:rgba(92,224,184,.3);color:#5ce0b8}
+#btn-estop{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.25);color:#ef4444}
+#btn-estop:hover{background:rgba(239,68,68,.18)}
+#btn-estop.active{background:rgba(239,68,68,.3);border-color:#ef4444;animation:pulse-glow 1s ease infinite}
+
+.speed-group{display:flex;gap:4px;margin-left:8px}
+.speed-group button{padding:6px 10px;font-size:10px;min-width:38px}
+.speed-group button.active{background:rgba(255,179,71,.15);border-color:rgba(255,179,71,.4);color:#ffb347}
+
+#camera-hint{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);font-size:10px;opacity:.3;
+  pointer-events:none;transition:opacity 1s}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div>
+    <div id="topbar">
+      <h1>Soarin' 3D Operations</h1>
+      <div class="stats">
+        <div>Queue <span id="s-queue">0</span></div>
+        <div>Riding <span id="s-riding">0</span></div>
+        <div>Served <span id="s-served">0</span></div>
+        <div>Rate <span id="s-rate">0</span>/hr</div>
+      </div>
+    </div>
+    <div id="cards">
+      <div class="tcard" style="--tc:#4da6ff" id="card-A">
+        <div class="tcard-head"><div class="tcard-label">Theater A</div><div class="tcard-state idle" id="state-A">Idle</div></div>
+        <div class="tcard-bar"><div class="tcard-fill" id="fill-A" style="width:0%"></div></div>
+        <div class="tcard-info"><span id="count-A">0 / 27</span><span id="timer-A"></span></div>
+      </div>
+      <div class="tcard" style="--tc:#ffb347" id="card-B">
+        <div class="tcard-head"><div class="tcard-label">Theater B</div><div class="tcard-state idle" id="state-B">Idle</div></div>
+        <div class="tcard-bar"><div class="tcard-fill" id="fill-B" style="width:0%"></div></div>
+        <div class="tcard-info"><span id="count-B">0 / 33</span><span id="timer-B"></span></div>
+      </div>
+      <div class="tcard" style="--tc:#5ce0b8" id="card-C">
+        <div class="tcard-head"><div class="tcard-label">Theater C</div><div class="tcard-state idle" id="state-C">Idle</div></div>
+        <div class="tcard-bar"><div class="tcard-fill" id="fill-C" style="width:0%"></div></div>
+        <div class="tcard-info"><span id="count-C">0 / 27</span><span id="timer-C"></span></div>
+      </div>
+    </div>
+  </div>
+  <div id="controls">
+    <button id="btn-dispatch">DISPATCH NEXT</button>
+    <button id="btn-auto">AUTO: OFF</button>
+    <button id="btn-estop">E-STOP</button>
+    <div class="speed-group">
+      <button data-speed="0.5">0.5×</button>
+      <button data-speed="1" class="active">1×</button>
+      <button data-speed="2">2×</button>
+      <button data-speed="5">5×</button>
+      <button data-speed="10">10×</button>
+    </div>
+  </div>
+</div>
+<div id="camera-hint">Drag to orbit · Scroll to zoom · Right-drag to pan</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@0.162.0",
+    "three/addons/": "https://esm.sh/three@0.162.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ═══════════════════════════════════════════════════
+// CONFIGURATION
+// ═══════════════════════════════════════════════════
+
+const THEATER_CFG = {
+  A: { rows: [10, 10, 7], total: 27, color: 0x4da6ff, hex: '#4da6ff',
+       center: { x: -22, z: 16 }, screenZ: 9, preflightZ: 4,
+       gateDir: 'west' },
+  B: { rows: [11, 11, 11], total: 33, color: 0xffb347, hex: '#ffb347',
+       center: { x: 22, z: 16 }, screenZ: 9, preflightZ: 4,
+       gateDir: 'east' },
+  C: { rows: [10, 10, 7], total: 27, color: 0x5ce0b8, hex: '#5ce0b8',
+       center: { x: 0, z: -22 }, screenZ: -29, preflightZ: -14,
+       gateDir: 'north' },
+};
+const THEATER_IDS = ['A', 'B', 'C'];
+const TOTAL_CAPACITY = 87;
+
+const RIDE_SECS    = 240;
+const UNLOAD_SECS  = 60;
+const LOAD_TIMEOUT = 120;
+const GUEST_SPEED  = 6;
+const SPAWN_RATE   = 1.8;
+const MAX_QUEUE    = 200;
+const ROW_HEIGHTS  = [3, 6, 9];
+
+const COLORS = {
+  ground:    0x0c0c1e,
+  queue:     0x14143a,
+  corridor:  0x181848,
+  preflight: 0x1c1c52,
+  theater:   0x0e1e2a,
+  wall:      0x2a2d55,
+  wallTop:   0x383c68,
+};
+
+// ═══════════════════════════════════════════════════
+// PATHS (waypoint arrays for guest navigation)
+// ═══════════════════════════════════════════════════
+
+const QUEUE_PATH = [
+  {x:28, z:26}, {x:14, z:26}, {x:14, z:24}, {x:26, z:24},
+  {x:26, z:22}, {x:14, z:22}, {x:14, z:20}, {x:26, z:20},
+  {x:26, z:18}, {x:14, z:18}, {x:14, z:16}, {x:10, z:14},
+  {x:6, z:10}, {x:2, z:4}, {x:0, z:0},
+];
+
+const GATE_PATHS = {
+  A: [{x:0,z:0},{x:-5,z:-1},{x:-12,z:-1},{x:-18,z:1},{x:-22,z:4}],
+  B: [{x:0,z:0},{x:5,z:-1},{x:12,z:-1},{x:18,z:1},{x:22,z:4}],
+  C: [{x:0,z:0},{x:-1,z:-4},{x:-1,z:-8},{x:0,z:-12},{x:0,z:-14}],
+};
+
+const EXIT_PATHS = {
+  A: [{x:-22,z:24},{x:-22,z:30},{x:-26,z:36}],
+  B: [{x:22,z:24},{x:22,z:30},{x:26,z:36}],
+  C: [{x:6,z:-22},{x:14,z:-22},{x:20,z:-26}],
+};
+
+// ═══════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════
+
+const state = {
+  speed: 1,
+  autoDispatch: false,
+  emergencyStop: false,
+  totalServed: 0,
+  simTime: 0,
+  lastSpawn: 0,
+};
+
+const waitingQueue = [];
+const allGuests = [];
+let guestIdCounter = 0;
+
+const theaters = {};
+THEATER_IDS.forEach(id => {
+  const cfg = THEATER_CFG[id];
+  theaters[id] = {
+    id,
+    state: 'IDLE',
+    timer: 0,
+    seated: 0,
+    dispatched: 0,
+    guests: [],
+    rowMeshes: [],
+    screenMesh: null,
+    seatPositions: [],
+    cfg,
+  };
+});
+
+// ═══════════════════════════════════════════════════
+// THREE.JS SETUP
+// ═══════════════════════════════════════════════════
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x06060f);
+scene.fog = new THREE.FogExp2(0x06060f, 0.008);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.5, 200);
+camera.position.set(0, 55, 50);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.prepend(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 4);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI / 2.1;
+controls.minDistance = 15;
+controls.maxDistance = 120;
+controls.update();
+
+// Lights
+const ambient = new THREE.AmbientLight(0x2a2a4a, 0.6);
+scene.add(ambient);
+
+const hemi = new THREE.HemisphereLight(0x1a2a5a, 0x0a0a1a, 0.5);
+scene.add(hemi);
+
+const dirLight = new THREE.DirectionalLight(0x4466aa, 0.8);
+dirLight.position.set(-20, 40, 10);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(1024, 1024);
+dirLight.shadow.camera.left = -50;
+dirLight.shadow.camera.right = 50;
+dirLight.shadow.camera.top = 50;
+dirLight.shadow.camera.bottom = -50;
+scene.add(dirLight);
+
+const pointA = new THREE.PointLight(0x4da6ff, 0.5, 30);
+pointA.position.set(-22, 8, 14);
+scene.add(pointA);
+
+const pointB = new THREE.PointLight(0xffb347, 0.5, 30);
+pointB.position.set(22, 8, 14);
+scene.add(pointB);
+
+const pointC = new THREE.PointLight(0x5ce0b8, 0.5, 30);
+pointC.position.set(0, 8, -22);
+scene.add(pointC);
+
+// ═══════════════════════════════════════════════════
+// MATERIALS
+// ═══════════════════════════════════════════════════
+
+const groundMat = new THREE.MeshStandardMaterial({ color: COLORS.ground, roughness: 0.9, metalness: 0.1 });
+const wallMat   = new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.7, metalness: 0.2 });
+const queueMat  = new THREE.MeshStandardMaterial({ color: COLORS.queue, roughness: 0.85 });
+const corrMat   = new THREE.MeshStandardMaterial({ color: COLORS.corridor, roughness: 0.85 });
+const pfMat     = new THREE.MeshStandardMaterial({ color: COLORS.preflight, roughness: 0.8, metalness: 0.1 });
+const theaterFloorMat = new THREE.MeshStandardMaterial({ color: COLORS.theater, roughness: 0.7 });
+
+const screenMats = {};
+THEATER_IDS.forEach(id => {
+  screenMats[id] = new THREE.MeshStandardMaterial({
+    color: 0x0a1a2a,
+    emissive: new THREE.Color(THEATER_CFG[id].color).multiplyScalar(0.15),
+    emissiveIntensity: 0.3,
+    side: THREE.DoubleSide,
+    roughness: 0.2,
+    metalness: 0.6,
+  });
+});
+
+const rowMat = new THREE.MeshStandardMaterial({ color: 0x1a2040, roughness: 0.5, metalness: 0.3 });
+
+const guestMats = {
+  queue: new THREE.MeshStandardMaterial({ color: 0xccccee, emissive: 0xccccee, emissiveIntensity: 0.3 }),
+  A: new THREE.MeshStandardMaterial({ color: 0x4da6ff, emissive: 0x4da6ff, emissiveIntensity: 0.4 }),
+  B: new THREE.MeshStandardMaterial({ color: 0xffb347, emissive: 0xffb347, emissiveIntensity: 0.4 }),
+  C: new THREE.MeshStandardMaterial({ color: 0x5ce0b8, emissive: 0x5ce0b8, emissiveIntensity: 0.4 }),
+};
+
+const guestGeo = new THREE.SphereGeometry(0.28, 8, 6);
+
+// ═══════════════════════════════════════════════════
+// LAYOUT BUILDERS
+// ═══════════════════════════════════════════════════
+
+function makeWall(x1, z1, x2, z2, h = 3.5, thick = 0.3) {
+  const dx = x2 - x1, dz = z2 - z1;
+  const len = Math.sqrt(dx * dx + dz * dz);
+  if (len < 0.01) return null;
+  const angle = Math.atan2(dx, dz);
+  const geo = new THREE.BoxGeometry(thick, h, len);
+  const mesh = new THREE.Mesh(geo, wallMat);
+  mesh.position.set((x1 + x2) / 2, h / 2, (z1 + z2) / 2);
+  mesh.rotation.y = angle;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function makeFloor(x, z, w, d, mat, y = 0.01) {
+  const geo = new THREE.PlaneGeometry(w, d);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, y, z);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+function buildGround() {
+  const ground = makeFloor(0, 0, 120, 100, groundMat, 0);
+  scene.add(ground);
+
+  // Grid overlay
+  const gridHelper = new THREE.GridHelper(100, 50, 0x15152a, 0x10102a);
+  gridHelper.position.y = 0.02;
+  scene.add(gridHelper);
+}
+
+function buildQueueArea() {
+  scene.add(makeFloor(20, 22, 20, 16, queueMat, 0.03));
+
+  const walls = [
+    [10, 15, 10, 27], [30, 15, 30, 27],
+    [10, 15, 30, 15],
+    [10, 27, 24, 27], [28, 27, 30, 27],
+  ];
+  walls.forEach(([x1, z1, x2, z2]) => { const w = makeWall(x1, z1, x2, z2, 1.5); if (w) scene.add(w); });
+
+  // Switchback dividers (low rails)
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x3a3d6a, roughness: 0.6 });
+  const dividers = [
+    [12, 25, 28, 25], [12, 23, 28, 23],
+    [12, 21, 28, 21], [12, 19, 28, 19],
+    [12, 17, 28, 17],
+  ];
+  dividers.forEach(([x1, z1, x2, z2], i) => {
+    const gap = i % 2 === 0 ? 'left' : 'right';
+    const gapSize = 2;
+    if (gap === 'left') {
+      const w = makeWall(x1 + gapSize, z1, x2, z2, 0.8, 0.15);
+      if (w) { w.material = railMat; scene.add(w); }
+    } else {
+      const w = makeWall(x1, z1, x2 - gapSize, z2, 0.8, 0.15);
+      if (w) { w.material = railMat; scene.add(w); }
+    }
+  });
+}
+
+function buildCorridors() {
+  scene.add(makeFloor(6, 8, 14, 10, corrMat, 0.03));
+  scene.add(makeFloor(-11, 0, 18, 4, corrMat, 0.03));
+  scene.add(makeFloor(11, 0, 18, 4, corrMat, 0.03));
+  scene.add(makeFloor(0, -7, 4, 16, corrMat, 0.03));
+  scene.add(makeFloor(-22, 2, 6, 8, pfMat, 0.04));
+  scene.add(makeFloor(22, 2, 6, 8, pfMat, 0.04));
+  scene.add(makeFloor(0, -14, 8, 6, pfMat, 0.04));
+
+  const hw = 1.8;
+  const corrWalls = [
+    [-2, -2, -2, 14, hw], [2, -2, 2, 8, hw],
+    [-2, -2, -20, -2, hw], [-20, -2, -20, -1, hw],
+    [2, -2, 20, -2, hw], [20, -2, 20, -1, hw],
+    [-2, -2, -2, -16, hw], [2, -2, 2, -16, hw],
+  ];
+  corrWalls.forEach(([x1, z1, x2, z2, h]) => {
+    const w = makeWall(x1, z1, x2, z2, h);
+    if (w) scene.add(w);
+  });
+}
+
+function buildTheater(id) {
+  const cfg = THEATER_CFG[id];
+  const t = theaters[id];
+  const cx = cfg.center.x, cz = cfg.center.z;
+  const group = new THREE.Group();
+
+  const tw = 16, td = 16;
+  group.add(makeFloor(cx, cz, tw, td, theaterFloorMat, 0.05));
+
+  const hw = 4;
+  const halfW = tw / 2, halfD = td / 2;
+  const theaterWalls = [];
+
+  if (id === 'C') {
+    theaterWalls.push([cx - halfW, cz - halfD, cx + halfW, cz - halfD]);
+    theaterWalls.push([cx - halfW, cz - halfD, cx - halfW, cz + halfD]);
+    theaterWalls.push([cx + halfW, cz - halfD, cx + halfW, cz + halfD - 4]);
+    theaterWalls.push([cx + halfW, cz + halfD, cx - 3, cz + halfD]);
+    theaterWalls.push([cx + 3, cz + halfD, cx + halfW, cz + halfD]);
+  } else {
+    theaterWalls.push([cx - halfW, cz - halfD, cx + halfW, cz - halfD]);
+    theaterWalls.push([cx - halfW, cz + halfD, cx + halfW, cz + halfD]);
+    theaterWalls.push([cx - halfW, cz - halfD, cx - halfW, cz + halfD]);
+    if (id === 'A') {
+      theaterWalls.push([cx + halfW, cz - halfD, cx + halfW, cz + halfD - 4]);
+      theaterWalls.push([cx + halfW, cz + halfD, cx + halfW, cz + halfD]);
+    } else {
+      theaterWalls.push([cx - halfW, cz - halfD, cx - halfW, cz + halfD - 4]);
+      theaterWalls.push([cx + halfW, cz - halfD, cx + halfW, cz + halfD]);
+    }
+  }
+  theaterWalls.forEach(([x1, z1, x2, z2]) => {
+    const w = makeWall(x1, z1, x2, z2, hw);
+    if (w) group.add(w);
+  });
+
+  // Screen (half-cylinder)
+  const screenR = 7, screenH = 5;
+  const screenGeo = new THREE.CylinderGeometry(screenR, screenR, screenH, 32, 1, true, 0, Math.PI);
+  const screen = new THREE.Mesh(screenGeo, screenMats[id]);
+  if (id === 'C') {
+    screen.position.set(cx, screenH / 2 + 0.5, cz - halfD + 2);
+    screen.rotation.y = Math.PI;
+  } else {
+    screen.position.set(cx, screenH / 2 + 0.5, cz - halfD + 2);
+    screen.rotation.y = Math.PI;
+  }
+  t.screenMesh = screen;
+  group.add(screen);
+
+  // Seat rows
+  const seatPositions = [];
+  cfg.rows.forEach((numSeats, ri) => {
+    const rowZ = cz - halfD + 5 + ri * 3.2;
+    const rowW = Math.min(tw - 3, numSeats * 1.2);
+    const rowGeo = new THREE.BoxGeometry(rowW, 0.4, 1.2);
+    const rowMesh = new THREE.Mesh(rowGeo, rowMat.clone());
+    rowMesh.position.set(cx, 0.2, rowZ);
+    rowMesh.castShadow = true;
+    t.rowMeshes.push(rowMesh);
+    group.add(rowMesh);
+
+    // Individual seat markers
+    const rowSeats = [];
+    for (let si = 0; si < numSeats; si++) {
+      const sx = cx - rowW / 2 + 0.6 + si * ((rowW - 1.2) / Math.max(numSeats - 1, 1));
+      const sz = rowZ;
+      rowSeats.push({ x: sx, z: sz, row: ri, seat: si });
+
+      const seatGeo = new THREE.BoxGeometry(0.5, 0.15, 0.6);
+      const seatMat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(cfg.color).multiplyScalar(0.3),
+        emissive: new THREE.Color(cfg.color),
+        emissiveIntensity: 0.05,
+        roughness: 0.6,
+      });
+      const seatMesh = new THREE.Mesh(seatGeo, seatMat);
+      seatMesh.position.set(sx, 0.5, sz);
+      group.add(seatMesh);
+    }
+    seatPositions.push(...rowSeats);
+  });
+  t.seatPositions = seatPositions;
+
+  scene.add(group);
+
+  // Label sprite
+  const label = createLabel(`Theater ${id}`, cfg.hex);
+  label.position.set(cx, 6, cz);
+  scene.add(label);
+}
+
+function createLabel(text, color) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.font = 'bold 28px "IBM Plex Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 32);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(8, 2, 1);
+  return sprite;
+}
+
+function buildHubMarker() {
+  const hubGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.1, 32);
+  const hubMat = new THREE.MeshStandardMaterial({
+    color: 0x3a4080, emissive: 0x4a50aa, emissiveIntensity: 0.3, roughness: 0.4
+  });
+  const hub = new THREE.Mesh(hubGeo, hubMat);
+  hub.position.set(0, 0.06, 0);
+  hub.receiveShadow = true;
+  scene.add(hub);
+
+  const hubLabel = createLabel('HUB', '#8888cc');
+  hubLabel.position.set(0, 3, 0);
+  scene.add(hubLabel);
+}
+
+function buildLayout() {
+  buildGround();
+  buildQueueArea();
+  buildCorridors();
+  THEATER_IDS.forEach(id => buildTheater(id));
+  buildHubMarker();
+
+  // Queue entrance marker
+  const entranceLabel = createLabel('QUEUE', '#6a6a9a');
+  entranceLabel.position.set(28, 3, 28);
+  scene.add(entranceLabel);
+
+  // Exit labels
+  const exitLabelA = createLabel('EXIT', '#4a4a7a');
+  exitLabelA.position.set(-24, 3, 32);
+  scene.add(exitLabelA);
+  const exitLabelB = createLabel('EXIT', '#4a4a7a');
+  exitLabelB.position.set(24, 3, 32);
+  scene.add(exitLabelB);
+  const exitLabelC = createLabel('EXIT', '#4a4a7a');
+  exitLabelC.position.set(16, 3, -26);
+  scene.add(exitLabelC);
+}
+
+// ═══════════════════════════════════════════════════
+// SEAT POSITION CALCULATOR
+// ═══════════════════════════════════════════════════
+
+function getSeatPosition(theaterId, seatIndex) {
+  const t = theaters[theaterId];
+  if (seatIndex < t.seatPositions.length) {
+    return t.seatPositions[seatIndex];
+  }
+  return t.seatPositions[t.seatPositions.length - 1];
+}
+
+// ═══════════════════════════════════════════════════
+// GUEST SYSTEM
+// ═══════════════════════════════════════════════════
+
+function createGuest() {
+  const id = guestIdCounter++;
+  const mesh = new THREE.Mesh(guestGeo, guestMats.queue);
+  mesh.position.set(QUEUE_PATH[0].x + (Math.random() - 0.5) * 0.5, 0.35, QUEUE_PATH[0].z + (Math.random() - 0.5) * 0.5);
+  mesh.castShadow = true;
+  scene.add(mesh);
+
+  const guest = {
+    id,
+    mesh,
+    state: 'queuing',
+    path: QUEUE_PATH,
+    pathIdx: 0,
+    progress: 0,
+    theater: null,
+    seatIdx: -1,
+    offsetX: (Math.random() - 0.5) * 0.6,
+    offsetZ: (Math.random() - 0.5) * 0.6,
+    bobPhase: Math.random() * Math.PI * 2,
+  };
+  allGuests.push(guest);
+  return guest;
+}
+
+function removeGuest(guest) {
+  scene.remove(guest.mesh);
+  guest.mesh.geometry = undefined;
+  guest.state = 'done';
+  const idx = allGuests.indexOf(guest);
+  if (idx >= 0) allGuests.splice(idx, 1);
+}
+
+function moveAlongPath(guest, dt) {
+  if (guest.pathIdx >= guest.path.length - 1) return true;
+
+  const from = guest.path[guest.pathIdx];
+  const to = guest.path[guest.pathIdx + 1];
+  const dx = to.x - from.x, dz = to.z - from.z;
+  const segLen = Math.sqrt(dx * dx + dz * dz);
+  if (segLen < 0.01) { guest.pathIdx++; return guest.pathIdx >= guest.path.length - 1; }
+
+  guest.progress += (GUEST_SPEED * dt) / segLen;
+
+  if (guest.progress >= 1) {
+    guest.progress -= 1;
+    guest.pathIdx++;
+    if (guest.pathIdx >= guest.path.length - 1) {
+      const last = guest.path[guest.path.length - 1];
+      guest.mesh.position.x = last.x + guest.offsetX * 0.3;
+      guest.mesh.position.z = last.z + guest.offsetZ * 0.3;
+      return true;
+    }
+  }
+
+  const p = Math.min(guest.progress, 1);
+  const cfrom = guest.path[guest.pathIdx];
+  const cto = guest.path[Math.min(guest.pathIdx + 1, guest.path.length - 1)];
+  guest.mesh.position.x = cfrom.x + (cto.x - cfrom.x) * p + guest.offsetX * 0.3;
+  guest.mesh.position.z = cfrom.z + (cto.z - cfrom.z) * p + guest.offsetZ * 0.3;
+  guest.mesh.position.y = 0.35 + Math.sin(state.simTime * 3 + guest.bobPhase) * 0.06;
+
+  return false;
+}
+
+function updateGuest(guest, dt) {
+  switch (guest.state) {
+    case 'queuing': {
+      const arrived = moveAlongPath(guest, dt);
+      if (arrived) {
+        guest.state = 'waiting';
+        waitingQueue.push(guest);
+      }
+      break;
+    }
+    case 'waiting':
+      guest.mesh.position.y = 0.35 + Math.sin(state.simTime * 2 + guest.bobPhase) * 0.08;
+      break;
+
+    case 'dispatched': {
+      const arrived = moveAlongPath(guest, dt);
+      if (arrived) {
+        guest.state = 'seated';
+        const t = theaters[guest.theater];
+        t.seated++;
+      }
+      break;
+    }
+    case 'seated':
+      guest.mesh.position.y = 0.6 + Math.sin(state.simTime * 1.5 + guest.bobPhase) * 0.02;
+      break;
+
+    case 'riding': {
+      const t = theaters[guest.theater];
+      if (!t) break;
+      const seat = getSeatPosition(guest.theater, guest.seatIdx);
+      const rideProgress = 1 - t.timer / RIDE_SECS;
+      const liftPhase = rideProgress < 0.06 ? rideProgress / 0.06
+                      : rideProgress > 0.94 ? (1 - rideProgress) / 0.06
+                      : 1;
+      const lift = liftPhase * ROW_HEIGHTS[seat.row];
+      guest.mesh.position.y = 0.6 + lift + Math.sin(state.simTime * 0.8 + guest.bobPhase) * 0.04;
+      break;
+    }
+    case 'exiting': {
+      const arrived = moveAlongPath(guest, dt);
+      if (arrived) {
+        state.totalServed++;
+        removeGuest(guest);
+      }
+      break;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// DISPATCH SYSTEM
+// ═══════════════════════════════════════════════════
+
+function dispatch(targetId) {
+  if (state.emergencyStop) return false;
+
+  let tid = targetId;
+  if (!tid) {
+    tid = THEATER_IDS.find(id => theaters[id].state === 'IDLE');
+  }
+  if (!tid || theaters[tid].state !== 'IDLE') return false;
+
+  const t = theaters[tid];
+  const capacity = t.cfg.total;
+  const count = Math.min(capacity, waitingQueue.length);
+  if (count === 0) return false;
+
+  t.state = 'LOADING';
+  t.timer = LOAD_TIMEOUT;
+  t.seated = 0;
+  t.dispatched = count;
+  t.guests = [];
+
+  const gatePath = GATE_PATHS[tid];
+
+  for (let i = 0; i < count; i++) {
+    const guest = waitingQueue.shift();
+    if (!guest) break;
+
+    guest.theater = tid;
+    guest.seatIdx = i;
+    guest.state = 'dispatched';
+    guest.mesh.material = guestMats[tid];
+
+    const seat = getSeatPosition(tid, i);
+    guest.path = [...gatePath, { x: seat.x, z: seat.z }];
+    guest.pathIdx = 0;
+    guest.progress = 0;
+    guest.offsetX *= 0.5;
+    guest.offsetZ *= 0.5;
+
+    t.guests.push(guest);
+  }
+
+  return true;
+}
+
+// ═══════════════════════════════════════════════════
+// THEATER UPDATE
+// ═══════════════════════════════════════════════════
+
+function updateTheater(t, dt) {
+  switch (t.state) {
+    case 'IDLE':
+      break;
+
+    case 'LOADING':
+      t.timer -= dt;
+      if (t.seated >= t.dispatched || t.timer <= 0) {
+        t.state = 'RIDING';
+        t.timer = RIDE_SECS;
+        t.guests.forEach(g => { g.state = 'riding'; });
+      }
+      break;
+
+    case 'RIDING':
+      t.timer -= dt;
+
+      // Animate row meshes
+      {
+        const rideProgress = 1 - t.timer / RIDE_SECS;
+        const liftPhase = rideProgress < 0.06 ? rideProgress / 0.06
+                        : rideProgress > 0.94 ? (1 - rideProgress) / 0.06
+                        : 1;
+        t.rowMeshes.forEach((mesh, ri) => {
+          mesh.position.y = 0.2 + liftPhase * ROW_HEIGHTS[ri];
+        });
+
+        // Animate screen glow
+        if (t.screenMesh) {
+          const baseColor = new THREE.Color(THEATER_CFG[t.id].color);
+          t.screenMesh.material.emissive.copy(baseColor);
+          t.screenMesh.material.emissiveIntensity = 0.3 + liftPhase * 1.2 + Math.sin(state.simTime * 2) * 0.1 * liftPhase;
+        }
+      }
+
+      if (t.timer <= 0) {
+        t.state = 'UNLOADING';
+        t.timer = UNLOAD_SECS;
+
+        t.rowMeshes.forEach(mesh => { mesh.position.y = 0.2; });
+        if (t.screenMesh) {
+          t.screenMesh.material.emissiveIntensity = 0.3;
+        }
+
+        t.guests.forEach(g => {
+          g.state = 'exiting';
+          g.path = EXIT_PATHS[t.id];
+          g.pathIdx = 0;
+          g.progress = 0;
+        });
+      }
+      break;
+
+    case 'UNLOADING':
+      t.timer -= dt;
+      if (t.timer <= 0 || t.guests.every(g => g.state === 'done' || !allGuests.includes(g))) {
+        t.state = 'IDLE';
+        t.timer = 0;
+        t.seated = 0;
+        t.dispatched = 0;
+        t.guests = [];
+      }
+      break;
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// HUD UPDATE
+// ═══════════════════════════════════════════════════
+
+const domCache = {
+  sQueue: document.getElementById('s-queue'),
+  sRiding: document.getElementById('s-riding'),
+  sServed: document.getElementById('s-served'),
+  sRate: document.getElementById('s-rate'),
+};
+
+THEATER_IDS.forEach(id => {
+  domCache[`state${id}`] = document.getElementById(`state-${id}`);
+  domCache[`fill${id}`] = document.getElementById(`fill-${id}`);
+  domCache[`count${id}`] = document.getElementById(`count-${id}`);
+  domCache[`timer${id}`] = document.getElementById(`timer-${id}`);
+  domCache[`card${id}`] = document.getElementById(`card-${id}`);
+});
+
+function formatTime(secs) {
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function updateHUD() {
+  const riding = THEATER_IDS.reduce((n, id) =>
+    n + (theaters[id].state === 'RIDING' ? theaters[id].dispatched : 0), 0);
+
+  domCache.sQueue.textContent = waitingQueue.length;
+  domCache.sRiding.textContent = riding;
+  domCache.sServed.textContent = state.totalServed;
+
+  const elapsed = state.simTime;
+  const rate = elapsed > 10 ? Math.round((state.totalServed / elapsed) * 3600) : 0;
+  domCache.sRate.textContent = rate;
+
+  THEATER_IDS.forEach(id => {
+    const t = theaters[id];
+    const stateEl = domCache[`state${id}`];
+    const fillEl = domCache[`fill${id}`];
+    const countEl = domCache[`count${id}`];
+    const timerEl = domCache[`timer${id}`];
+    const cardEl = domCache[`card${id}`];
+
+    const stateName = t.state === 'IDLE' ? 'Idle'
+                    : t.state === 'LOADING' ? 'Loading'
+                    : t.state === 'RIDING' ? 'Flying'
+                    : 'Unloading';
+    const stateClass = t.state === 'IDLE' ? 'idle'
+                     : t.state === 'LOADING' ? 'loading'
+                     : t.state === 'RIDING' ? 'riding'
+                     : 'unloading';
+
+    stateEl.textContent = stateName;
+    stateEl.className = 'tcard-state ' + stateClass;
+
+    const pct = t.dispatched > 0 ? Math.round((t.seated / t.dispatched) * 100)
+              : t.state === 'RIDING' ? 100 : 0;
+    fillEl.style.width = pct + '%';
+
+    countEl.textContent = `${t.seated} / ${t.cfg.total}`;
+    timerEl.textContent = (t.state === 'RIDING' || t.state === 'UNLOADING') ? formatTime(t.timer) : '';
+
+    cardEl.classList.toggle('active', t.state !== 'IDLE');
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// CONTROLS
+// ═══════════════════════════════════════════════════
+
+document.getElementById('btn-dispatch').addEventListener('click', () => {
+  dispatch();
+});
+
+const autoBtn = document.getElementById('btn-auto');
+autoBtn.addEventListener('click', () => {
+  state.autoDispatch = !state.autoDispatch;
+  autoBtn.textContent = state.autoDispatch ? 'AUTO: ON' : 'AUTO: OFF';
+  autoBtn.classList.toggle('on', state.autoDispatch);
+});
+
+const estopBtn = document.getElementById('btn-estop');
+estopBtn.addEventListener('click', () => {
+  state.emergencyStop = !state.emergencyStop;
+  estopBtn.classList.toggle('active', state.emergencyStop);
+  estopBtn.textContent = state.emergencyStop ? 'E-STOP ON' : 'E-STOP';
+});
+
+document.querySelectorAll('.speed-group button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.speed-group button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.speed = parseFloat(btn.dataset.speed);
+  });
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// Fade camera hint
+setTimeout(() => {
+  const hint = document.getElementById('camera-hint');
+  if (hint) hint.style.opacity = '0';
+}, 5000);
+
+// ═══════════════════════════════════════════════════
+// INIT & ANIMATION LOOP
+// ═══════════════════════════════════════════════════
+
+buildLayout();
+
+let lastTime = performance.now();
+let spawnAccum = 0;
+let hudTimer = 0;
+
+function animate(now) {
+  requestAnimationFrame(animate);
+
+  const rawDt = Math.min((now - lastTime) / 1000, 0.1);
+  lastTime = now;
+
+  if (state.emergencyStop) {
+    controls.update();
+    renderer.render(scene, camera);
+    return;
+  }
+
+  const dt = rawDt * state.speed;
+  state.simTime += dt;
+
+  // Spawn guests
+  spawnAccum += dt;
+  const spawnInterval = 1 / SPAWN_RATE;
+  while (spawnAccum >= spawnInterval && allGuests.length < MAX_QUEUE + 100) {
+    spawnAccum -= spawnInterval;
+    createGuest();
+  }
+
+  // Auto dispatch
+  if (state.autoDispatch) {
+    THEATER_IDS.forEach(id => {
+      if (theaters[id].state === 'IDLE' && waitingQueue.length >= 5) {
+        dispatch(id);
+      }
+    });
+  }
+
+  // Update guests
+  for (let i = allGuests.length - 1; i >= 0; i--) {
+    updateGuest(allGuests[i], dt);
+  }
+
+  // Update theaters
+  THEATER_IDS.forEach(id => updateTheater(theaters[id], dt));
+
+  // Update HUD (throttled)
+  hudTimer += rawDt;
+  if (hudTimer > 0.15) {
+    hudTimer = 0;
+    updateHUD();
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+requestAnimationFrame(animate);
+
+</script>
+</body>
+</html>
