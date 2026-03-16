@@ -6,7 +6,7 @@ const GK = ['A', 'B', 'C'];
 const GATE_COLORS = { A: 0x4da6ff, B: 0xffb347, C: 0x5ce0b8 };
 const GATE_ROWS   = { A: [10, 10, 7], B: [11, 11, 11], C: [10, 10, 7] };
 const TOTAL = 87;
-const RIDE_DUR = 28;
+const RIDE_DUR = 45;
 const ROW_LIFTS = [2.5, 5, 8];
 
 const T_POS = [
@@ -89,17 +89,17 @@ function mkTube(scene, points, color, opacity = 0.3) {
 
 function createMaterials() {
   return {
-    ground:   new THREE.MeshStandardMaterial({ color: 0x0c0c1e, roughness: 0.9 }),
-    queue:    new THREE.MeshStandardMaterial({ color: 0x14143a, roughness: 0.85 }),
-    corridor: new THREE.MeshStandardMaterial({ color: 0x181848, roughness: 0.85 }),
-    preflight:new THREE.MeshStandardMaterial({ color: 0x1c1c52, roughness: 0.8 }),
-    wall:     new THREE.MeshStandardMaterial({ color: 0x2a2d55, roughness: 0.7, metalness: 0.2 }),
-    wallLow:  new THREE.MeshStandardMaterial({ color: 0x3a3d6a, roughness: 0.6, metalness: 0.15 }),
-    tFloor:   new THREE.MeshStandardMaterial({ color: 0x141e30, roughness: 0.7 }),
-    rowBg:    new THREE.MeshStandardMaterial({ color: 0x1a1a3a, roughness: 0.9 }),
-    ceiling:  new THREE.MeshStandardMaterial({ color: 0x0c0c1e, roughness: 0.95, side: THREE.DoubleSide }),
-    pillar:   new THREE.MeshStandardMaterial({ color: 0x22254a, roughness: 0.5, metalness: 0.3 }),
-    hub:      new THREE.MeshStandardMaterial({ color: 0x3a4080, emissive: 0x4a50aa, emissiveIntensity: 0.3, roughness: 0.4 }),
+    ground:   new THREE.MeshStandardMaterial({ color: 0x181830, roughness: 0.9 }),
+    queue:    new THREE.MeshStandardMaterial({ color: 0x222258, roughness: 0.85 }),
+    corridor: new THREE.MeshStandardMaterial({ color: 0x262660, roughness: 0.85 }),
+    preflight:new THREE.MeshStandardMaterial({ color: 0x2a2a6a, roughness: 0.8 }),
+    wall:     new THREE.MeshStandardMaterial({ color: 0x3e4270, roughness: 0.7, metalness: 0.2 }),
+    wallLow:  new THREE.MeshStandardMaterial({ color: 0x4e5182, roughness: 0.6, metalness: 0.15 }),
+    tFloor:   new THREE.MeshStandardMaterial({ color: 0x202e48, roughness: 0.7 }),
+    rowBg:    new THREE.MeshStandardMaterial({ color: 0x2a2a50, roughness: 0.9 }),
+    ceiling:  new THREE.MeshStandardMaterial({ color: 0x181830, roughness: 0.95, side: THREE.DoubleSide }),
+    pillar:   new THREE.MeshStandardMaterial({ color: 0x363968, roughness: 0.5, metalness: 0.3 }),
+    hub:      new THREE.MeshStandardMaterial({ color: 0x4a50a0, emissive: 0x5a60cc, emissiveIntensity: 0.5, roughness: 0.4 }),
   };
 }
 
@@ -108,7 +108,7 @@ function createMaterials() {
 function buildLayout(scene, mats) {
   // Ground
   scene.add(mkFloor(0, 0, 120, 100, mats.ground, 0));
-  const grid = new THREE.GridHelper(100, 50, 0x15152a, 0x10102a);
+  const grid = new THREE.GridHelper(100, 50, 0x252548, 0x1a1a3a);
   grid.position.y = 0.015;
   scene.add(grid);
 
@@ -146,10 +146,10 @@ function buildLayout(scene, mats) {
   scene.add(hubMesh);
 
   // Path lines from hub to theaters
-  mkTube(scene, GATE_ROUTE.A, 0x4da6ff, 0.25);
-  mkTube(scene, GATE_ROUTE.B, 0xffb347, 0.25);
-  mkTube(scene, GATE_ROUTE.C, 0x5ce0b8, 0.25);
-  mkTube(scene, QUEUE_POINTS.slice(10), 0x6060aa, 0.15);
+  mkTube(scene, GATE_ROUTE.A, 0x4da6ff, 0.45);
+  mkTube(scene, GATE_ROUTE.B, 0xffb347, 0.45);
+  mkTube(scene, GATE_ROUTE.C, 0x5ce0b8, 0.45);
+  mkTube(scene, QUEUE_POINTS.slice(10), 0x6060aa, 0.3);
 
   // Labels
   const labels = [
@@ -205,8 +205,8 @@ function buildTheater(scene, ti, mats) {
   const screenColor = [0x4da6ff, 0xffb347, 0x5ce0b8][ti];
   const screenMat = new THREE.MeshStandardMaterial({
     color: 0x0a1a2a,
-    emissive: new THREE.Color(screenColor).multiplyScalar(0.15),
-    emissiveIntensity: 0.3,
+    emissive: new THREE.Color(screenColor).multiplyScalar(0.25),
+    emissiveIntensity: 0.5,
     side: THREE.DoubleSide,
     roughness: 0.2, metalness: 0.6,
   });
@@ -230,7 +230,7 @@ function buildTheater(scene, ti, mats) {
 
     // Section floor marker
     const sFloor = mkFloor(gx, cz + 1, BAR_W + 0.5, 11, new THREE.MeshStandardMaterial({
-      color: new THREE.Color(gateColor).multiplyScalar(0.06), roughness: 0.9,
+      color: new THREE.Color(gateColor).multiplyScalar(0.12), roughness: 0.9,
     }), 0.045);
     scene.add(sFloor);
 
@@ -257,7 +257,7 @@ function buildTheater(scene, ti, mats) {
       const fillMat = new THREE.MeshStandardMaterial({
         color: gateColor,
         emissive: new THREE.Color(gateColor),
-        emissiveIntensity: 0.5,
+        emissiveIntensity: 0.9,
         roughness: 0.4,
       });
       const fillMesh = new THREE.Mesh(fillGeo, fillMat);
@@ -272,7 +272,9 @@ function buildTheater(scene, ti, mats) {
         const sx = gx - BAR_W / 2 + 0.2 + si * seatW + seatW / 2;
         const sGeo = new THREE.BoxGeometry(seatW * 0.65, 0.08, 0.35);
         const sMat = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(gateColor).multiplyScalar(0.15),
+          color: new THREE.Color(gateColor).multiplyScalar(0.3),
+          emissive: new THREE.Color(gateColor),
+          emissiveIntensity: 0.15,
           roughness: 0.8,
         });
         const sMesh = new THREE.Mesh(sGeo, sMat);
@@ -285,10 +287,10 @@ function buildTheater(scene, ti, mats) {
   });
 
   // Theater point lights
-  const tLight = new THREE.PointLight(screenColor, 1.2, 30);
+  const tLight = new THREE.PointLight(screenColor, 2.0, 35);
   tLight.position.set(cx, wallH - 1, cz + SCREEN_Z_OFF + 3);
   scene.add(tLight);
-  const tLight2 = new THREE.PointLight(0xffffff, 0.4, 20);
+  const tLight2 = new THREE.PointLight(0xffffff, 0.8, 25);
   tLight2.position.set(cx, wallH - 0.5, cz);
   scene.add(tLight2);
 
@@ -332,20 +334,20 @@ function syncState(theaterData, theaters, activeT, time) {
 
     // Screen glow during ride
     if (td.screenMat) {
-      const base = new THREE.Color(td.screenColor).multiplyScalar(0.15);
+      const base = new THREE.Color(td.screenColor).multiplyScalar(0.25);
       if (isRiding) {
         const bright = new THREE.Color(td.screenColor);
         td.screenMat.emissive.copy(bright);
-        td.screenMat.emissiveIntensity = 0.3 + liftPhase * 1.8 + Math.sin(time * 2.5) * 0.15 * liftPhase;
+        td.screenMat.emissiveIntensity = 0.5 + liftPhase * 2.2 + Math.sin(time * 2.5) * 0.2 * liftPhase;
       } else {
         td.screenMat.emissive.copy(base);
-        td.screenMat.emissiveIntensity = 0.3;
+        td.screenMat.emissiveIntensity = 0.5;
       }
     }
 
     // Theater light intensity
     if (td.light) {
-      td.light.intensity = isRiding ? 0.6 + liftPhase * 1.2 : 0.6;
+      td.light.intensity = isRiding ? 1.2 + liftPhase * 1.8 : 1.0;
     }
   });
 }
@@ -367,7 +369,7 @@ export default function Scene3D({ theaters = [], activeT = 0, running = false, p
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x06060f);
-    scene.fog = new THREE.FogExp2(0x06060f, 0.007);
+    scene.fog = new THREE.FogExp2(0x06060f, 0.004);
 
     const w = el.clientWidth || 600;
     const h = el.clientHeight || 300;
@@ -380,7 +382,7 @@ export default function Scene3D({ theaters = [], activeT = 0, running = false, p
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = 1.6;
     el.appendChild(renderer.domElement);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -393,9 +395,9 @@ export default function Scene3D({ theaters = [], activeT = 0, running = false, p
     controls.update();
 
     // Lights
-    scene.add(new THREE.AmbientLight(0x3a3a6a, 1.0));
-    scene.add(new THREE.HemisphereLight(0x2a3a7a, 0x151530, 0.8));
-    const dir = new THREE.DirectionalLight(0x5577bb, 1.2);
+    scene.add(new THREE.AmbientLight(0x5a5a8a, 1.8));
+    scene.add(new THREE.HemisphereLight(0x4a5a9a, 0x252540, 1.4));
+    const dir = new THREE.DirectionalLight(0x7799cc, 1.8);
     dir.position.set(-20, 40, 10);
     dir.castShadow = true;
     dir.shadow.mapSize.set(1024, 1024);
@@ -411,7 +413,7 @@ export default function Scene3D({ theaters = [], activeT = 0, running = false, p
     const ringGeo = new THREE.TorusGeometry(9.5, 0.12, 4, 64);
     const ringMat = new THREE.MeshStandardMaterial({
       color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1,
-      transparent: true, opacity: 0.35,
+      transparent: true, opacity: 0.55,
     });
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = -Math.PI / 2;

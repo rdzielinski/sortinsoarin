@@ -12,7 +12,7 @@ const GATES = {
 const TOTAL = 87;
 const GK = ["A", "B", "C"];
 const ROW_NAMES = ["Row 1", "Row 2", "Row 3"];
-const RIDE_DURATION = 28;
+const RIDE_DURATION = 45;
 const UNLOAD_DURATION = 4;
 
 const DIFFS = {
@@ -401,7 +401,10 @@ export default function SoarinOps() {
           }
           if (th.status === "unloading") {
             const nt = th.rideTimer - 0.1;
-            if (nt <= 0) return { ...th, status: "empty", seats: mkSeats(), holding: [], rideTimer: 0 };
+            if (nt <= 0) {
+              const hasHolding = th.holding && th.holding.length > 0;
+              return { ...th, status: hasHolding ? "loading" : "empty", seats: mkSeats(), rideTimer: 0 };
+            }
             return { ...th, rideTimer: Math.max(0, +(nt).toFixed(1)) };
           }
           return th;
@@ -526,7 +529,7 @@ export default function SoarinOps() {
     const loadTime = elapsed - curTheater.loadStart;
 
     setTheaters(p => p.map((th, i) => i === activeT ? {
-      ...th, status: "riding", rideTimer: RIDE_DURATION, holding: [],
+      ...th, status: "riding", rideTimer: RIDE_DURATION,
       flightsCompleted: th.flightsCompleted + 1, lastPct: pct,
     } : th));
 
