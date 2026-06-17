@@ -44,6 +44,15 @@ const checkInterlock = (theater, isActive, sel, splitting) => {
 };
 
 // ═══════════════════════════════════════
+// PERSISTENCE (achievements + best shift)
+// ═══════════════════════════════════════
+const STORE_KEY = "soarin-ops-v1";
+const loadStore = () => {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
+};
+const EMPTY_BESTS = { flights: 0, avgOcc: 0, throughput: 0, guests: 0 };
+
+// ═══════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════
 export default function SoarinOps() {
@@ -66,7 +75,8 @@ export default function SoarinOps() {
   const [paused, setPaused] = useState(false);
   const [totalSeated, setTotalSeated] = useState(0);
   const [totalFlights, setTotalFlights] = useState(0);
-  const [unlocked, setUnlocked] = useState([]);
+  const [unlocked, setUnlocked] = useState(() => loadStore().unlocked || []);
+  const [bests, setBests] = useState(() => ({ ...EMPTY_BESTS, ...(loadStore().bests || {}) }));
   const [newAch, setNewAch] = useState([]);
   const [usedSplit, setUsedSplit] = useState(false);
   const [streak, setStreak] = useState(0);
@@ -105,6 +115,7 @@ export default function SoarinOps() {
   const strictRef = useRef(false);
   const greenStreakRef = useRef(0);             // consecutive interlock-clean dispatches
   const showFlightsRef = useRef(0);             // flights dispatched while in Show Mode
+  const occSumRef = useRef(0);                  // Σ occupancy% (for best-shift avg)
   const faultsRef = useRef(0);
   const wasRidingRef = useRef(false);
 
@@ -152,11 +163,27 @@ export default function SoarinOps() {
     splittingRef.current = splitting;
     activeTRef.current = activeT;
     strictRef.current = strict;
+    occSumRef.current = occSum;
   });
 
   // Append to the RSS cue/fault log (newest first, capped).
   const logEvent = useCallback((kind, theater, text) => {
     setEventLog(prev => [{ id: `${Date.now()}-${Math.random()}`, t: elapsedRef.current, kind, theater, text }, ...prev].slice(0, 40));
+  }, []);
+
+  // Persist achievements + best-shift stats across reloads.
+  useEffect(() => {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ unlocked, bests })); } catch {}
+  }, [unlocked, bests]);
+
+  // Fold the current shift's stats into the saved bests (max of each).
+  const recordBests = useCallback(() => {
+    setBests(b => ({
+      flights: Math.max(b.flights || 0, totalFlightsRef.current),
+      guests: Math.max(b.guests || 0, totalSeatedRef.current),
+      avgOcc: Math.max(b.avgOcc || 0, totalFlightsRef.current > 0 ? Math.round(occSumRef.current / totalFlightsRef.current) : 0),
+      throughput: Math.max(b.throughput || 0, elapsedRef.current > 5000 ? Math.round(totalSeatedRef.current / (elapsedRef.current / 3600000)) : 0),
+    }));
   }, []);
 
   // Cleanup audio on unmount
@@ -405,6 +432,7 @@ export default function SoarinOps() {
     if (showMode && elapsedRef.current >= 180000 && faultsRef.current === 0 && totalFlightsRef.current > 0) {
       unlock(["nohold"]);
     }
+    recordBests();
     setPaused(true);
     setShowReport(true);
   };
@@ -698,6 +726,21 @@ export default function SoarinOps() {
           ))}
         </div>
 
+        {bests.flights > 0 && (
+          <div style={{ display: "flex", gap: 14, justifyContent: "center", marginBottom: 16, flexWrap: "wrap" }}>
+            {[
+              { label: "BEST FLIGHTS", val: bests.flights },
+              { label: "BEST AVG OCC", val: `${bests.avgOcc}%` },
+              { label: "BEST THRUPUT", val: `${bests.throughput}/hr` },
+            ].map((s, i) => (
+              <div key={i} style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 1.5 }}>{s.label}</div>
+                <div style={{ fontSize: 15, fontWeight: 800, fontFamily: "monospace", color: "#5ce0b8" }}>{s.val}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {unlocked.length > 0 && (
           <div style={{ textAlign: "center", marginBottom: 16 }}>
             <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)", letterSpacing: 2.5, marginBottom: 6 }}>ACHIEVEMENTS</div>
@@ -777,7 +820,7 @@ export default function SoarinOps() {
 
         {/* HEADER */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexShrink: 0 }}>
-          <div onClick={() => { if (!running || paused) { setDiff(null); setRunning(false); audioMgr.stopAmbient(); audioMgr.stopRide(); } }}
+          <div onClick={() => { if (!running || paused) { recordBests(); setDiff(null); setRunning(false); audioMgr.stopAmbient(); audioMgr.stopRide(); } }}
             style={{ cursor: "pointer", fontSize: 10, color: "rgba(255,255,255,.25)", letterSpacing: 1.5, transition: "color .2s" }}
             onMouseEnter={e => e.currentTarget.style.color = "rgba(255,255,255,.5)"}
             onMouseLeave={e => e.currentTarget.style.color = "rgba(255,255,255,.25)"}>
@@ -1396,7 +1439,7 @@ export default function SoarinOps() {
                     flex: 1, padding: "9px 0", borderRadius: 9, border: "1px solid rgba(34,197,94,.25)",
                     background: "rgba(34,197,94,.1)", color: "#86efac", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, cursor: "pointer",
                   }}>▶ RESUME SHIFT</button>
-                  <button onClick={() => { setShowReport(false); setDiff(null); setRunning(false); audioMgr.stopAmbient(); audioMgr.stopRide(); }} style={{
+                  <button onClick={() => { recordBests(); setShowReport(false); setDiff(null); setRunning(false); audioMgr.stopAmbient(); audioMgr.stopRide(); }} style={{
                     flex: 1, padding: "9px 0", borderRadius: 9, border: "1px solid rgba(255,255,255,.1)",
                     background: "rgba(255,255,255,.03)", color: "rgba(255,255,255,.6)", fontSize: 11, fontWeight: 800, letterSpacing: 1.5, cursor: "pointer",
                   }}>↩ MENU</button>

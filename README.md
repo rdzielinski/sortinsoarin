@@ -16,6 +16,7 @@ npm install
 npm run dev      # dev server
 npm run build    # production build → dist/
 npm run preview
+npm test         # timing-model tests (node, no deps)
 ```
 
 ## Show-control model
@@ -31,15 +32,21 @@ clockwork every 28 seconds, evenly spaced (Theater 1 at +29 s, Theater 2 at
 is typically mid-load while the others are lifting, flying, or unloading. Each
 theater's **dispatch moment** is its `load → lift` transition, and every dispatch
 is gated by an **interlock** — a seat check (restraints/rows seated) plus closed
-gates (no group mid-placement). In **Phase 1 (shipping)** the interlocks are
-**advisory**: the per-theater status dot reads green (ready) / amber (loading) /
-red (held), but the clock dispatches on cue regardless. **Phase 2** is wired
-behind the `INTERLOCK_GATING` flag (off by default): flip it on and an un-ready
-theater is **HELD** at its dispatch cue — it faults, breaks the streak, and takes
-a throughput penalty instead of flying. The whole model is deterministic and
-re-derives from one tunable (`PHASE_DURATIONS.load`); the staggered cadence,
-interlock gating, and the live Show Clock panel are exactly the subsystems an
-RSS / ride-show supervisor watches firing on a clock, in sync.
+gates (no group mid-placement). Interlocks run in one of two modes (toggle, key
+`I`):
+
+- **ADVISORY** (default) — the per-theater status dot reads green (ready) /
+  amber (loading) / red (held), but the clock dispatches on cue regardless.
+- **STRICT** — dispatch is **gated**. If a theater's interlock isn't clear at
+  its cue it is **HELD** (faults, breaks the streak), and it dispatches **late**
+  the moment the interlock clears, then resumes its now-shifted cadence. This is
+  modelled as a per-theater clock shift, so ADVISORY remains the exact
+  deterministic global clock and STRICT layers the hold/recovery on top.
+
+The whole model is deterministic and re-derives from one tunable
+(`PHASE_DURATIONS.load`); the staggered cadence, interlocks, cue/fault log, and
+the live Show Clock panel are exactly the subsystems an RSS / ride-show
+supervisor watches firing on a clock, in sync.
 
 The single tunable is `PHASE_DURATIONS.load` in `src/showControl.js`; `CYCLE`,
 `DISPATCH_INTERVAL`, and `THEATER_OFFSET` all derive from it — nothing else is
@@ -54,16 +61,25 @@ menu and in the header) selects the behavior:
   **load each theater during its load window**; dispatch is automatic on the
   cue. The **Show Clock** panel shows three staggered lanes (proportional
   load/lift/fly/unload segments, a moving playhead, an interlock dot, and
-  occupancy %), plus a header with the live dispatch interval, throughput, and a
-  "next dispatch in X / Theater N" countdown.
+  occupancy %), plus a header with the live dispatch interval, average
+  occupancy, throughput, and a "next dispatch in X / Theater N" countdown. A
+  **cue/fault log** records timestamped DISPATCH / HELD / ONLINE events, and
+  **END SHIFT** opens a report (flights, guests, avg occupancy, throughput vs.
+  the theoretical max + efficiency %, interlock holds, star rating).
 - **OFF** — the original free-play game: fill theaters and dispatch manually
   (`D`) whenever you like.
+
+Earned achievements and best-shift stats persist across reloads
+(`localStorage`). Show-control achievements include **Green Board** (5
+consecutive interlock-clean dispatches), **On The Clock** (10 show-mode
+dispatches), and **Clean Shift** (a 3 min+ shift with zero holds).
 
 ## Controls
 
 `Q` release Standby · `L` release Lightning Lane · `1/2/3` switch theater ·
 `4–9`/`0` select group · `S` split · `D` dispatch (free-play) ·
-`Y` toggle Synchronized Show Mode · `M` mute · `Space` pause · `Esc` deselect.
+`Y` toggle Synchronized Show Mode · `I` toggle STRICT interlocks ·
+`M` mute · `Space` pause · `Esc` deselect.
 
 ## Project layout
 
@@ -71,15 +87,20 @@ The shipped app is `index.html` + `src/` + `public/`:
 
 | File | Role |
 | --- | --- |
-| `src/SoarinOps.jsx` | Main game: queues, theaters, loading, scoring, achievements, single game loop |
+| `src/SoarinOps.jsx` | Main game: queues, theaters, loading, scoring, interlock gating, single game loop |
 | `src/showControl.js` | Show-control timing model — constants + `theaterShowState` / `theaterPhase` / `nextDispatch` (single source of truth) |
 | `src/ShowClock.jsx` | Show Clock panel — staggered theater lanes, phase segments, playhead, interlock dots |
-| `src/Scene3D.jsx` | Three.js 3D theater/queue viewport |
+| `src/gameConfig.js` | Game constants, difficulties, achievements, seat/group helpers |
+| `src/audio.js` | Web Audio SFX + ambient/ride `AudioManager` |
+| `src/sceneBits.jsx` | Presentational SVG bits (clouds, ride vehicle) |
+| `src/Scene3D.jsx` | Three.js 3D viewport (lazy-loaded into its own chunk) |
+| `test/showControl.test.mjs` | Timing-model tests (`npm test`) |
 | `public/*` | Audio (ambient/ride/preshow/check/open) and image assets |
 
 The clock runs off the **existing 100 ms game loop** (no second timer) by feeding
 the accumulated game time into `theaterShowState`, which keeps the visualization
-and the auto-dispatch perfectly in sync.
+and the auto-dispatch perfectly in sync. The Three.js viewport is lazy-loaded so
+the initial bundle stays small.
 
 > Note: the root-level `SoarinLoading.jsx`, `sim3d.html`, `Sim.js`, and `Paths.js`
 > are legacy prototypes and are **not** part of the Vite build.
