@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Scene3D from "./Scene3D.jsx";
+import ShowClock from "./ShowClock.jsx";
+import {
+  PHASE_DURATIONS,
+  THEATER_COUNT,
+  theaterPhase,
+} from "./showControl.js";
 
 // ═══════════════════════════════════════
 // CONFIG
@@ -185,6 +191,25 @@ const seatsFilled = (seats) => GK.reduce((t, k) => t + seats[k].reduce((a, r) =>
 const getStars = (pct) => pct >= 97 ? 5 : pct >= 93 ? 4 : pct >= 85 ? 3 : pct >= 70 ? 2 : 1;
 
 // ═══════════════════════════════════════
+// INTERLOCKS (show-control safety gate)
+// ───────────────────────────────────────
+// Phase 1 (now): interlocks are VISIBLE but ADVISORY — dispatch still
+// fires on the clock regardless. Phase 2: flip INTERLOCK_GATING to true
+// and the dispatch is GATED — an un-ready theater is HELD (fault) at its
+// dispatch moment instead of flying. Wired but OFF by default.
+const INTERLOCK_GATING = false;
+
+// A theater is interlocked/ready when its restraints have passed seat
+// check (every occupied row is seated) and its gates are closed (no group
+// mid-placement). Only the active theater can have a group mid-placement.
+const checkInterlock = (theater, isActive, sel, splitting) => {
+  const filled = seatsFilled(theater.seats);
+  const gatesClosed = !(isActive && (sel != null || splitting));
+  const seatCheck = filled > 0; // placement is atomic, so any seated row is checked
+  return { ready: gatesClosed && seatCheck, gatesClosed, seatCheck, filled };
+};
+
+// ═══════════════════════════════════════
 // FLOATING CLOUDS COMPONENT
 // ═══════════════════════════════════════
 function FloatingClouds({ count = 6, opacity = 0.06, inFlight = false }) {
@@ -352,6 +377,27 @@ export default function SoarinOps() {
   const [rideProgress, setRideProgress] = useState(0);
   const [dispatchFlash, setDispatchFlash] = useState(false);
   const [menuHovered, setMenuHovered] = useState(null);
+  // Synchronized Show Mode — clock-driven staggered cadence. Default ON so a
+  // reviewer sees the show-control behavior first; OFF = original free-play.
+  const [showMode, setShowMode] = useState(true);
+  const [faults, setFaults] = useState(0); // interlock holds (Phase 2 throughput penalty)
+
+  // Refs mirror live state so the single game-loop interval can read fresh
+  // values + auto-dispatch without a second clock or stale closures.
+  const elapsedRef = useRef(0);
+  const theatersRef = useRef([]);
+  const totalFlightsRef = useRef(0);
+  const streakRef = useRef(0);
+  const unlockedRef = useRef([]);
+  const totalSeatedRef = useRef(0);
+  const usedSplitRef = useRef(false);
+  const selRef = useRef(null);
+  const splittingRef = useRef(false);
+  const activeTRef = useRef(0);
+  const prevPhaseRef = useRef(["preshow", "preshow", "preshow"]);
+  const heldRef = useRef([false, false, false]);
+  const faultsRef = useRef(0);
+  const wasRidingRef = useRef(false);
 
   const mt = useRef(null);
   const toast = useCallback((t, type = "info") => {
@@ -365,6 +411,29 @@ export default function SoarinOps() {
   const curPct = Math.round((curFilled / TOTAL) * 100);
   const selGroup = curTheater.holding.find(g => g.id === sel);
   const anyRiding = theaters.some(t => t.status === "riding");
+
+  // ─── SHOW-CONTROL DERIVED VALUES ───
+  const showNow = elapsed / 1000; // single global show clock (seconds)
+  const curShow = showMode ? theaterPhase(showNow, activeT) : null;
+  const curInterlock = checkInterlock(curTheater, true, sel, splitting);
+  const throughput = elapsed > 5000 ? Math.round(totalSeated / (elapsed / 3600000)) : null;
+  const showLanes = theaters.map((th, i) => {
+    const il = checkInterlock(th, i === activeT, sel, splitting);
+    return { occPct: Math.round((seatsFilled(th.seats) / TOTAL) * 100), ready: il.ready, held: th.status === "held" };
+  });
+
+  // Keep refs in sync with live state for the interval-driven loop.
+  useEffect(() => {
+    theatersRef.current = theaters;
+    totalFlightsRef.current = totalFlights;
+    streakRef.current = streak;
+    unlockedRef.current = unlocked;
+    totalSeatedRef.current = totalSeated;
+    usedSplitRef.current = usedSplit;
+    selRef.current = sel;
+    splittingRef.current = splitting;
+    activeTRef.current = activeT;
+  });
 
   // Cleanup audio on unmount
   useEffect(() => () => audioMgr.cleanup(), []);
@@ -387,36 +456,148 @@ export default function SoarinOps() {
     return () => clearInterval(iv);
   }, [anyRiding, paused]);
 
-  // ─── MAIN TICK ───
+  // ─── FLIGHT SCORING (shared by manual + auto/clock dispatch) ───
+  const applyFlightScore = useCallback((pct, loadTime, allRiding) => {
+    SFX.depart();
+    setTimeout(() => audioMgr.playCheck(), 700);
+    setTimeout(() => audioMgr.playOpen(), 1500);
+    setTimeout(() => audioMgr.playRide(), 2300);
+    setDispatchFlash(true);
+    setTimeout(() => setDispatchFlash(false), 1200);
+
+    const tf = totalFlightsRef.current + 1;
+    totalFlightsRef.current = tf;
+    setTotalFlights(tf);
+
+    const ns = pct >= 90 ? streakRef.current + 1 : 0;
+    streakRef.current = ns;
+    setStreak(ns);
+
+    const checks = [
+      { id: "perfect", c: pct >= 100 },
+      { id: "speed", c: pct >= 80 && loadTime < 25000 },
+      { id: "triple", c: allRiding },
+      { id: "split", c: usedSplitRef.current },
+      { id: "ten", c: tf >= 10 },
+      { id: "twenty", c: tf >= 20 },
+      { id: "streak", c: ns >= 3 },
+      { id: "served500", c: totalSeatedRef.current >= 500 },
+    ];
+    const fresh = checks.filter(a => a.c && !unlockedRef.current.includes(a.id)).map(a => a.id);
+    if (fresh.length > 0) {
+      SFX.achieve();
+      unlockedRef.current = [...unlockedRef.current, ...fresh];
+      setUnlocked(unlockedRef.current);
+      setNewAch(ACHIEVEMENTS.filter(a => fresh.includes(a.id)));
+      setTimeout(() => setNewAch([]), 4000);
+    }
+    if (pct >= 95) { setConfetti(true); setTimeout(() => setConfetti(false), 3500); }
+  }, []);
+
+  // ─── MAIN TICK (single game loop — also drives the show clock) ───
   useEffect(() => {
     if (!running || paused || !diff) return;
     const iv = setInterval(() => {
-      setElapsed(p => p + 100);
-      setTheaters(prev => {
-        const next = prev.map(th => {
-          if (th.status === "riding") {
-            const nt = th.rideTimer - 0.1;
-            if (nt <= 0) return { ...th, status: "unloading", rideTimer: UNLOAD_DURATION };
-            return { ...th, rideTimer: Math.max(0, +(nt).toFixed(1)) };
-          }
-          if (th.status === "unloading") {
-            const nt = th.rideTimer - 0.1;
-            if (nt <= 0) {
-              const hasHolding = th.holding && th.holding.length > 0;
-              return { ...th, status: hasHolding ? "loading" : "empty", seats: mkSeats(), rideTimer: 0 };
+      elapsedRef.current += 100;
+      setElapsed(elapsedRef.current);
+
+      if (!showMode) {
+        // ── FREE-PLAY: original behavior, untouched ──
+        setTheaters(prev => {
+          const next = prev.map(th => {
+            if (th.status === "riding") {
+              const nt = th.rideTimer - 0.1;
+              if (nt <= 0) return { ...th, status: "unloading", rideTimer: UNLOAD_DURATION };
+              return { ...th, rideTimer: Math.max(0, +(nt).toFixed(1)) };
             }
-            return { ...th, rideTimer: Math.max(0, +(nt).toFixed(1)) };
+            if (th.status === "unloading") {
+              const nt = th.rideTimer - 0.1;
+              if (nt <= 0) {
+                const hasHolding = th.holding && th.holding.length > 0;
+                return { ...th, status: hasHolding ? "loading" : "empty", seats: mkSeats(), rideTimer: 0 };
+              }
+              return { ...th, rideTimer: Math.max(0, +(nt).toFixed(1)) };
+            }
+            return th;
+          });
+          if (prev.some(t => t.status === "riding") && !next.some(t => t.status === "riding")) {
+            setTimeout(() => audioMgr.stopRide(), 0);
           }
-          return th;
+          return next;
         });
-        if (prev.some(t => t.status === "riding") && !next.some(t => t.status === "riding")) {
-          setTimeout(() => audioMgr.stopRide(), 0);
+        return;
+      }
+
+      // ── SYNCHRONIZED SHOW MODE: derive every theater from the global clock ──
+      const now = elapsedRef.current / 1000;
+      const cur = theatersRef.current;
+      const events = [];
+      const next = cur.map((th, i) => {
+        const ps = theaterPhase(now, i);
+        const prevPhase = prevPhaseRef.current[i];
+        prevPhaseRef.current[i] = ps.phase;
+
+        let nth = th;
+        // Entering a fresh load window (from preshow or unload): reset seats,
+        // carry over any still-holding groups, restart the load timer, clear hold.
+        if (ps.phase === "load" && prevPhase !== "load") {
+          nth = { ...nth, seats: mkSeats(), loadStart: elapsedRef.current };
+          heldRef.current[i] = false;
         }
-        return next;
+
+        // Map the clock phase onto the existing status state-machine.
+        let status, rideTimer = 0, rideTotal;
+        if (ps.phase === "preshow") { status = "standby"; }
+        else if (ps.phase === "load") { status = "loading"; }
+        else if (ps.phase === "unload") {
+          status = "unloading"; rideTimer = ps.phaseRemaining; rideTotal = PHASE_DURATIONS.unload;
+        } else { // lift + fly = the dispatched flight
+          status = "riding";
+          rideTimer = (PHASE_DURATIONS.load + PHASE_DURATIONS.lift + PHASE_DURATIONS.fly) - ps.localTime;
+          rideTotal = PHASE_DURATIONS.lift + PHASE_DURATIONS.fly;
+        }
+
+        // Dispatch moment = load→lift transition (the single instant the
+        // countdown, auto-dispatch and interlock all reference).
+        if (prevPhase === "load" && ps.phase !== "load") {
+          const pct = Math.round((seatsFilled(th.seats) / TOTAL) * 100);
+          const gatesClosed = !((i === activeTRef.current) && (selRef.current != null || splittingRef.current));
+          const ready = gatesClosed && pct > 0;
+          if (INTERLOCK_GATING && !ready) {
+            // Phase 2: interlock fault — HELD for the rest of this cycle (flag OFF now).
+            heldRef.current[i] = true;
+            events.push({ type: "held", i });
+          } else {
+            events.push({ type: "dispatch", i, pct, loadTime: elapsedRef.current - th.loadStart });
+            nth = { ...nth, lastPct: pct, flightsCompleted: th.flightsCompleted + 1 };
+          }
+        }
+
+        // A held theater shows the fault for the whole flight window, not one tick.
+        if (heldRef.current[i]) status = "held";
+
+        return { ...nth, status, rideTimer, rideTotal, held: heldRef.current[i] };
+      });
+
+      const ridingCount = next.filter(t => t.status === "riding").length;
+      theatersRef.current = next;
+      setTheaters(next);
+
+      if (wasRidingRef.current && ridingCount === 0) setTimeout(() => audioMgr.stopRide(), 0);
+      wasRidingRef.current = ridingCount > 0;
+
+      events.forEach(ev => {
+        if (ev.type === "dispatch") {
+          applyFlightScore(ev.pct, ev.loadTime, ridingCount === THEATER_COUNT);
+        } else { // held
+          streakRef.current = 0; setStreak(0);
+          faultsRef.current += 1; setFaults(faultsRef.current);
+          SFX.error();
+        }
       });
     }, 100);
     return () => clearInterval(iv);
-  }, [running, paused, diff]);
+  }, [running, paused, diff, showMode, applyFlightScore]);
 
   // ─── GUEST ARRIVAL ───
   useEffect(() => {
@@ -434,20 +615,31 @@ export default function SoarinOps() {
     setDiff(d); setRunning(true); setPaused(false); setElapsed(0);
     setSbQueue(Array.from({ length: 8 }, () => mkGroup(DIFFS[d].groupMax)));
     setLlQueue(Array.from({ length: 4 }, () => mkGroup(Math.min(DIFFS[d].groupMax, 6))));
-    setTheaters([
+    const initTheaters = [
       { status: "empty", seats: mkSeats(), holding: [], rideTimer: 0, flightsCompleted: 0, loadStart: 0, lastPct: 0 },
       { status: "empty", seats: mkSeats(), holding: [], rideTimer: 0, flightsCompleted: 0, loadStart: 0, lastPct: 0 },
       { status: "empty", seats: mkSeats(), holding: [], rideTimer: 0, flightsCompleted: 0, loadStart: 0, lastPct: 0 },
-    ]);
+    ];
+    setTheaters(initTheaters);
     setActiveT(0); setSel(null); setSplitting(false);
     setTotalSeated(0); setTotalFlights(0); setUsedSplit(false); setStreak(0);
-    setNewAch([]);
+    setNewAch([]); setFaults(0);
+    // Reset the show clock + loop refs to a clean baseline.
+    elapsedRef.current = 0;
+    theatersRef.current = initTheaters;
+    totalFlightsRef.current = 0; streakRef.current = 0;
+    totalSeatedRef.current = 0; usedSplitRef.current = false;
+    faultsRef.current = 0; wasRidingRef.current = false;
+    heldRef.current = [false, false, false];
+    prevPhaseRef.current = [0, 1, 2].map(i => theaterPhase(0, i).phase);
     audioMgr.playAmbient();
   };
 
   // ─── MERGE ───
   const releaseSB = () => {
-    if (paused || curTheater.status === "riding" || curTheater.status === "unloading") return;
+    if (paused) return;
+    if (showMode && curTheater.status !== "loading") { toast("Theater not in its load window", "error"); return; }
+    if (!showMode && (curTheater.status === "riding" || curTheater.status === "unloading")) return;
     if (sbQueue.length === 0) { toast("Standby queue empty", "error"); return; }
     const batch = sbQueue.slice(0, 3);
     setSbQueue(p => p.slice(batch.length));
@@ -460,7 +652,9 @@ export default function SoarinOps() {
   };
 
   const releaseLL = () => {
-    if (paused || curTheater.status === "riding" || curTheater.status === "unloading") return;
+    if (paused) return;
+    if (showMode && curTheater.status !== "loading") { toast("Theater not in its load window", "error"); return; }
+    if (!showMode && (curTheater.status === "riding" || curTheater.status === "unloading")) return;
     if (llQueue.length === 0) { toast("Lightning Lane empty", "error"); return; }
     const batch = llQueue.slice(0, 2);
     setLlQueue(p => p.slice(batch.length));
@@ -515,52 +709,45 @@ export default function SoarinOps() {
     setSel(null); setSplitting(false); toast(`Split ${selGroup.size} → ${n}+${selGroup.size - n}`, "info");
   };
 
-  // ─── DISPATCH ───
+  // ─── DISPATCH (manual — free-play only; Show Mode dispatches on the clock) ───
   const dispatch = () => {
+    if (showMode) return;
     if (curTheater.status !== "loading" || paused) return;
     const pct = Math.round((seatsFilled(curTheater.seats) / TOTAL) * 100);
-    SFX.depart();
-    setTimeout(() => audioMgr.playCheck(), 700);
-    setTimeout(() => audioMgr.playOpen(), 1500);
-    setTimeout(() => audioMgr.playRide(), 2300);
-    setDispatchFlash(true);
-    setTimeout(() => setDispatchFlash(false), 1200);
-
     const loadTime = elapsed - curTheater.loadStart;
+    const allRiding = theaters.filter(t => t.status === "riding").length === 2;
 
     setTheaters(p => p.map((th, i) => i === activeT ? {
       ...th, status: "riding", rideTimer: RIDE_DURATION,
       flightsCompleted: th.flightsCompleted + 1, lastPct: pct,
     } : th));
 
-    const tf = totalFlights + 1;
-    setTotalFlights(tf);
-    const ns = pct >= 90 ? streak + 1 : 0;
-    setStreak(ns);
-
-    const allRiding = theaters.filter(t => t.status === "riding").length === 2;
-
-    const checks = [
-      { id: "perfect", c: pct >= 100 },
-      { id: "speed", c: pct >= 80 && loadTime < 25000 },
-      { id: "triple", c: allRiding },
-      { id: "split", c: usedSplit },
-      { id: "ten", c: tf >= 10 },
-      { id: "twenty", c: tf >= 20 },
-      { id: "streak", c: ns >= 3 },
-      { id: "served500", c: totalSeated >= 500 },
-    ];
-    const fresh = checks.filter(a => a.c && !unlocked.includes(a.id)).map(a => a.id);
-    if (fresh.length > 0) {
-      SFX.achieve();
-      setUnlocked(p => [...p, ...fresh]);
-      setNewAch(ACHIEVEMENTS.filter(a => fresh.includes(a.id)));
-      setTimeout(() => setNewAch([]), 4000);
-    }
-    if (pct >= 95) { setConfetti(true); setTimeout(() => setConfetti(false), 3500); }
+    applyFlightScore(pct, loadTime, allRiding);
 
     const nextEmpty = theaters.findIndex((t, i) => i !== activeT && (t.status === "empty" || t.status === "loading"));
     if (nextEmpty >= 0) { setActiveT(nextEmpty); SFX.tabSwitch(); }
+  };
+
+  // ─── MODE TOGGLE ───
+  const toggleShowMode = () => {
+    setShowMode(v => {
+      const nv = !v;
+      if (nv) {
+        // Re-baseline the clock so enabling mid-game doesn't fire a stray dispatch.
+        prevPhaseRef.current = [0, 1, 2].map(i => theaterPhase(elapsedRef.current / 1000, i).phase);
+      } else {
+        // Leaving Show Mode: normalize clock-only statuses back to free-play ones
+        // and drop the clock-derived phase length so timers read normally.
+        setTheaters(p => p.map(th => {
+          const base = (th.status === "standby" || th.status === "held")
+            ? { ...th, status: th.holding.length ? "loading" : "empty", rideTimer: 0 }
+            : th;
+          return { ...base, rideTotal: undefined };
+        }));
+      }
+      SFX.route();
+      return nv;
+    });
   };
 
   // ─── KEYBOARD ───
@@ -575,6 +762,7 @@ export default function SoarinOps() {
       if (k === "l" && !paused) { releaseLL(); return; }
       if (k === "d" && !paused) { dispatch(); return; }
       if (k === "m") { setMuted(audioMgr.toggleMute()); return; }
+      if (k === "y") { toggleShowMode(); return; }
       if (["1", "2", "3"].includes(k) && !sel && !splitting) {
         const ti = parseInt(k) - 1;
         if (ti !== activeT) { setActiveT(ti); SFX.tabSwitch(); setSel(null); setSplitting(false); }
@@ -677,9 +865,34 @@ export default function SoarinOps() {
           </div>
         </div>
 
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,.28)", letterSpacing: 2.5, marginBottom: 28, textAlign: "center", maxWidth: 440, lineHeight: 1.8, fontWeight: 500 }}>
-          Manage the merge point, route guests to 3 theaters,
-          <br />load the gates, and dispatch flights — all simultaneously.
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,.28)", letterSpacing: 2.5, marginBottom: 18, textAlign: "center", maxWidth: 470, lineHeight: 1.8, fontWeight: 500 }}>
+          Ride/show supervisor (RSS) console — run three theaters on one
+          <br />show clock: load each gate during its window, hit the staggered
+          <br />dispatch cue every 28s, and keep every interlock green.
+        </div>
+
+        {/* Synchronized Show Mode toggle */}
+        <div onClick={toggleShowMode} style={{
+          display: "flex", alignItems: "center", gap: 11, cursor: "pointer", marginBottom: 24,
+          padding: "9px 16px", borderRadius: 11,
+          border: `1px solid ${showMode ? "rgba(92,224,184,.3)" : "rgba(255,255,255,.08)"}`,
+          background: showMode ? "rgba(92,224,184,.05)" : "rgba(255,255,255,.02)", transition: "all .25s",
+        }}>
+          <div style={{
+            width: 34, height: 18, borderRadius: 9, padding: 2, transition: "all .25s",
+            background: showMode ? "rgba(92,224,184,.45)" : "rgba(255,255,255,.1)",
+            display: "flex", justifyContent: showMode ? "flex-end" : "flex-start", alignItems: "center",
+          }}>
+            <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "all .25s" }} />
+          </div>
+          <div style={{ textAlign: "left" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1, color: showMode ? "#5ce0b8" : "rgba(255,255,255,.5)" }}>
+              SYNCHRONIZED SHOW MODE · {showMode ? "ON" : "OFF"}
+            </div>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,.3)", marginTop: 1 }}>
+              {showMode ? "Clock-driven staggered cadence + interlocks" : "Free-play — load and dispatch manually"}
+            </div>
+          </div>
         </div>
 
         {/* Difficulty cards */}
@@ -722,6 +935,7 @@ export default function SoarinOps() {
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>1/2/3</span> switch theater
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>D</span> dispatch
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>S</span> split
+          {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>Y</span> sync mode
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>M</span> mute
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>Space</span> pause
         </div>
@@ -732,8 +946,8 @@ export default function SoarinOps() {
   // ═══════════════════════════════════════
   // GAME SCREEN
   // ═══════════════════════════════════════
-  const statusColor = { empty: "rgba(255,255,255,.2)", loading: "#eab308", riding: "#22c55e", unloading: "#60a5fa" };
-  const statusLabel = { empty: "EMPTY", loading: "LOADING", riding: "IN FLIGHT", unloading: "CLEARING" };
+  const statusColor = { empty: "rgba(255,255,255,.2)", loading: "#eab308", riding: "#22c55e", unloading: "#60a5fa", standby: "rgba(255,255,255,.25)", held: "#ef4444" };
+  const statusLabel = { empty: "EMPTY", loading: "LOADING", riding: "IN FLIGHT", unloading: "CLEARING", standby: "STANDBY", held: "HELD" };
 
   return (
     <div style={{ minHeight: "100vh", height: "100vh", background: BG, color: "#fff", fontFamily: "'Avenir Next','Segoe UI',system-ui,sans-serif", position: "relative", overflow: "hidden" }}>
@@ -806,6 +1020,16 @@ export default function SoarinOps() {
               style={{ cursor: "pointer", fontSize: 12, border: "1px solid rgba(255,255,255,.08)", borderRadius: 6, padding: "2px 7px" }}>
               🏆<span style={{ fontSize: 10, color: "rgba(255,255,255,.35)", marginLeft: 2 }}>{unlocked.length}</span>
             </div>
+            <div onClick={toggleShowMode} title="Synchronized Show Mode — staggered clock-driven dispatch (Y)"
+              style={{
+                cursor: "pointer", fontSize: 9, fontWeight: 800, letterSpacing: 1, transition: "all .2s",
+                border: `1px solid ${showMode ? "rgba(92,224,184,.35)" : "rgba(255,255,255,.1)"}`,
+                borderRadius: 6, padding: "3px 8px",
+                color: showMode ? "#5ce0b8" : "rgba(255,255,255,.35)",
+                background: showMode ? "rgba(92,224,184,.06)" : "transparent",
+              }}>
+              SYNC {showMode ? "ON" : "OFF"}
+            </div>
             <div style={{ fontSize: 10, fontWeight: 800, color: DIFFS[diff].color, border: `1px solid ${DIFFS[diff].color}30`, borderRadius: 6, padding: "3px 9px", letterSpacing: 1 }}>{DIFFS[diff].label.toUpperCase()}</div>
           </div>
         </div>
@@ -818,6 +1042,7 @@ export default function SoarinOps() {
             { label: "GUESTS", val: totalSeated, color: "#fff" },
             { label: "STANDBY", val: sbQueue.length, color: sbQueue.length > 20 ? "#ef4444" : "#fff" },
             { label: "LL", val: llQueue.length, color: llQueue.length > 12 ? "#ef4444" : "#fff" },
+            ...(showMode ? [{ label: "HOLDS", val: faults, color: faults > 0 ? "#ef4444" : "#fff" }] : []),
           ].map((s, i) => (
             <div key={i} style={{ background: "rgba(255,255,255,.025)", borderRadius: 8, padding: "3px 12px", border: "1px solid rgba(255,255,255,.04)", textAlign: "center", minWidth: 62 }}>
               <div style={{ fontSize: 7, fontWeight: 700, color: "rgba(255,255,255,.25)", letterSpacing: 1.5 }}>{s.label}</div>
@@ -962,7 +1187,7 @@ export default function SoarinOps() {
                         <div style={{
                           height: "100%",
                           width: th.status === "riding" || th.status === "unloading"
-                            ? `${100 - ((th.rideTimer / (th.status === "riding" ? RIDE_DURATION : UNLOAD_DURATION)) * 100)}%`
+                            ? `${100 - ((th.rideTimer / (th.rideTotal || (th.status === "riding" ? RIDE_DURATION : UNLOAD_DURATION))) * 100)}%`
                             : `${p}%`,
                           background: th.status === "riding" ? "#22c55e" : occColor(p),
                           borderRadius: 2, transition: "width .3s",
@@ -1003,6 +1228,28 @@ export default function SoarinOps() {
                 <div style={{ fontSize: 28, fontWeight: 900, color: "#60a5fa", letterSpacing: 3 }}>CLEARING</div>
                 <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: "#60a5fa", marginTop: 4 }}>{Math.ceil(curTheater.rideTimer)}s</div>
                 <RideVehicle phase="docked" progress={0} pct={curTheater.lastPct} />
+              </div>
+            ) : curTheater.status === "standby" ? (
+              <div style={{
+                textAlign: "center", padding: "35px 20px", background: "rgba(255,255,255,.015)",
+                borderRadius: 14, border: "1px solid rgba(255,255,255,.04)",
+              }}>
+                <RideVehicle phase="docked" progress={0} pct={0} />
+                <div style={{ fontSize: 14, color: "rgba(255,255,255,.25)", letterSpacing: 2.5, fontWeight: 700, marginTop: 8 }}>THEATER {activeT + 1} · STANDBY</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.18)", marginTop: 6 }}>
+                  Comes online in {curShow ? Math.ceil(curShow.phaseRemaining) : 0}s — the show clock staggers theater open times
+                </div>
+              </div>
+            ) : curTheater.status === "held" ? (
+              <div style={{
+                textAlign: "center", padding: "30px 20px", borderRadius: 14,
+                background: "rgba(239,68,68,.04)", border: "1px solid rgba(239,68,68,.18)",
+              }}>
+                <div style={{ fontSize: 34, marginBottom: 6 }}>⛔</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: "#ef4444", letterSpacing: 3 }}>HELD</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.3)", marginTop: 6 }}>
+                  Interlock not satisfied at the dispatch cue — flight faulted
+                </div>
               </div>
             ) : curTheater.status === "empty" && curTheater.holding.length === 0 ? (
               <div style={{
@@ -1152,8 +1399,8 @@ export default function SoarinOps() {
                   })}
                 </div>
 
-                {/* Occupancy + Dispatch */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, flexShrink: 0 }}>
+                {/* Occupancy + Interlock + Dispatch */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, flexShrink: 0, gap: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{ height: 5, width: 90, background: "rgba(255,255,255,.05)", borderRadius: 3, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${curPct}%`, background: occColor(curPct), borderRadius: 3, transition: "width .3s" }} />
@@ -1161,23 +1408,61 @@ export default function SoarinOps() {
                     <span style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: occColor(curPct) }}>{curPct}%</span>
                     <span style={{ fontSize: 10, color: "rgba(255,255,255,.2)" }}>{curFilled}/{TOTAL}</span>
                   </div>
-                  <button onClick={dispatch} disabled={paused || curTheater.status !== "loading" || curFilled === 0}
+
+                  {/* Interlock status — seat check (restraints) + gates closed */}
+                  <div title="Seat check (interlock) — restraints checked and gates closed before dispatch"
                     style={{
-                      padding: "7px 18px", borderRadius: 8,
-                      border: "1px solid rgba(34,197,94,.25)",
-                      background: curFilled === 0 || paused ? "rgba(34,197,94,.03)" : "rgba(34,197,94,.1)",
-                      color: curFilled === 0 || paused ? "rgba(255,255,255,.12)" : "#86efac",
-                      fontSize: 12, fontWeight: 800, cursor: curFilled === 0 || paused ? "not-allowed" : "pointer",
-                      letterSpacing: 2.5, textTransform: "uppercase",
-                      transition: "all .2s",
+                      display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 8,
+                      border: `1px solid ${curInterlock.ready ? "rgba(34,197,94,.25)" : "rgba(234,179,8,.25)"}`,
+                      background: curInterlock.ready ? "rgba(34,197,94,.06)" : "rgba(234,179,8,.05)",
                     }}>
-                    DISPATCH ✈
-                  </button>
+                    <span style={{
+                      width: 8, height: 8, borderRadius: "50%",
+                      background: curInterlock.ready ? "#22c55e" : "#eab308",
+                      boxShadow: `0 0 6px ${curInterlock.ready ? "#22c55e" : "#eab308"}`,
+                    }} />
+                    <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color: curInterlock.ready ? "#86efac" : "#fde68a" }}>
+                      INTERLOCK {curInterlock.ready ? "READY" : "HOLD"}
+                    </span>
+                  </div>
+
+                  {showMode ? (
+                    <div title="Dispatch is automatic on the show clock"
+                      style={{
+                        padding: "7px 14px", borderRadius: 8, border: "1px solid rgba(147,197,253,.2)",
+                        background: "rgba(147,197,253,.05)", color: "#93c5fd",
+                        fontSize: 11, fontWeight: 800, letterSpacing: 1.5, textTransform: "uppercase",
+                        display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
+                      }}>
+                      <span style={{ animation: "breathe 2s ease infinite" }}>▣</span>
+                      AUTO-DISPATCH {curShow && curShow.phase === "load" ? `${Math.ceil(curShow.phaseRemaining)}s` : ""}
+                    </div>
+                  ) : (
+                    <button onClick={dispatch} disabled={paused || curTheater.status !== "loading" || curFilled === 0}
+                      style={{
+                        padding: "7px 18px", borderRadius: 8,
+                        border: "1px solid rgba(34,197,94,.25)",
+                        background: curFilled === 0 || paused ? "rgba(34,197,94,.03)" : "rgba(34,197,94,.1)",
+                        color: curFilled === 0 || paused ? "rgba(255,255,255,.12)" : "#86efac",
+                        fontSize: 12, fontWeight: 800, cursor: curFilled === 0 || paused ? "not-allowed" : "pointer",
+                        letterSpacing: 2.5, textTransform: "uppercase",
+                        transition: "all .2s",
+                      }}>
+                      DISPATCH ✈
+                    </button>
+                  )}
                 </div>
               </>
             )}
           </div>
         </div>
+
+        {/* SHOW CLOCK — synchronized-show transport (RSS cadence) */}
+        {showMode && (
+          <div style={{ flexShrink: 0, marginTop: 6 }}>
+            <ShowClock now={showNow} lanes={showLanes} throughput={throughput} paused={paused} />
+          </div>
+        )}
 
         {/* Keyboard help modal */}
         {showKeys && (
@@ -1195,7 +1480,8 @@ export default function SoarinOps() {
                 ["1 / 2 / 3", "Switch theater (no group selected)"],
                 ["4–9", "Select group from holding"],
                 ["S", "Toggle split mode"],
-                ["D", "Dispatch current theater"],
+                ["D", "Dispatch current theater (free-play)"],
+                ["Y", "Toggle Synchronized Show Mode"],
                 ["M", "Toggle audio mute"],
                 ["Space", "Pause / Resume"],
                 ["Esc", "Deselect"],
