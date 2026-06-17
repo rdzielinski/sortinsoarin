@@ -1,194 +1,21 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import Scene3D from "./Scene3D.jsx";
-import ShowClock from "./ShowClock.jsx";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import {
   PHASE_DURATIONS,
   THEATER_COUNT,
   theaterPhase,
 } from "./showControl.js";
+import ShowClock from "./ShowClock.jsx";
+import {
+  GATES, TOTAL, GK, ROW_NAMES, RIDE_DURATION, UNLOAD_DURATION,
+  DIFFS, ACHIEVEMENTS,
+  resetGroupIds, mkGroup, mkSeats, fmt, seatsFilled, getStars,
+} from "./gameConfig.js";
+import { SFX, getCtx, audioMgr } from "./audio.js";
+import { FloatingClouds, RideVehicle } from "./sceneBits.jsx";
 
-// ═══════════════════════════════════════
-// CONFIG
-// ═══════════════════════════════════════
-const GATES = {
-  A: { rows: [10, 10, 7], label: "A", color: "#4da6ff" },
-  B: { rows: [11, 11, 11], label: "B", color: "#ffb347" },
-  C: { rows: [10, 10, 7], label: "C", color: "#5ce0b8" },
-};
-const TOTAL = 87;
-const GK = ["A", "B", "C"];
-const ROW_NAMES = ["Row 1", "Row 2", "Row 3"];
-const RIDE_DURATION = 45;
-const UNLOAD_DURATION = 4;
-
-const DIFFS = {
-  easy: { label: "Easy", desc: "Slow arrivals · No countdown", groupMax: 6, sbRate: 3500, llRate: 6000, countdown: 0, color: "#22c55e" },
-  normal: { label: "Normal", desc: "Steady flow · Standard ops", groupMax: 10, sbRate: 2200, llRate: 4000, countdown: 0, color: "#eab308" },
-  hard: { label: "Hard", desc: "Rush hour · Guest patience drains", groupMax: 10, sbRate: 1400, llRate: 2800, countdown: 0, color: "#ef4444" },
-};
-
-const ACHIEVEMENTS = [
-  { id: "perfect", icon: "✦", title: "Perfect Flight", desc: "100% occupancy on a theater" },
-  { id: "speed", icon: "⚡", title: "Speed Demon", desc: "Dispatch in under 25 seconds" },
-  { id: "triple", icon: "🎯", title: "Triple Dispatch", desc: "All 3 theaters riding at once" },
-  { id: "split", icon: "✂", title: "Split Decision", desc: "Use the split mechanic" },
-  { id: "ten", icon: "👑", title: "CM of the Month", desc: "Dispatch 10 flights total" },
-  { id: "twenty", icon: "💎", title: "Veteran Operator", desc: "Dispatch 20 flights total" },
-  { id: "streak", icon: "🔥", title: "Hot Streak", desc: "3 flights over 90% in a row" },
-  { id: "served500", icon: "🎖", title: "500 Guests Served", desc: "Seat 500 total guests" },
-];
-
-// ═══════════════════════════════════════
-// AUDIO ENGINE
-// ═══════════════════════════════════════
-let _ctx = null;
-const getCtx = () => {
-  if (!_ctx) _ctx = new (window.AudioContext || window.webkitAudioContext)();
-  if (_ctx.state === "suspended") _ctx.resume();
-  return _ctx;
-};
-
-const playTone = (f, d, t = "sine", v = 0.1) => {
-  try {
-    const c = getCtx(), o = c.createOscillator(), g = c.createGain();
-    o.type = t; o.frequency.value = f;
-    g.gain.setValueAtTime(v, c.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + d);
-    o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime + d);
-  } catch {}
-};
-
-const SFX = {
-  select: () => playTone(880, .08, "sine", .07),
-  place: () => playTone(660, .12, "triangle", .09),
-  rowFull: () => { playTone(880, .15, "sine", .09); setTimeout(() => playTone(1100, .2, "sine", .09), 100) },
-  error: () => playTone(220, .2, "sawtooth", .05),
-  split: () => { playTone(600, .08, "triangle", .07); setTimeout(() => playTone(800, .08, "triangle", .07), 80) },
-  depart: () => { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => playTone(f, .3, "sine", .09), i * 150)) },
-  achieve: () => { [784, 988, 1175, 1318].forEach((f, i) => setTimeout(() => playTone(f, .25, "triangle", .08), i * 120)) },
-  merge: () => playTone(520, .1, "triangle", .06),
-  route: () => { playTone(440, .08, "sine", .06); setTimeout(() => playTone(660, .1, "sine", .07), 70) },
-  tabSwitch: () => playTone(1000, .05, "sine", .04),
-};
-
-// ═══════════════════════════════════════
-// AMBIENT / RIDE AUDIO MANAGER
-// ═══════════════════════════════════════
-class AudioManager {
-  constructor() {
-    this.ambient = null;
-    this.ride = null;
-    this.check = null;
-    this.open = null;
-    this.preshow = null;
-    this.muted = false;
-    this.ambientVol = 0.3;
-    this.rideVol = 0.5;
-    this.sfxVol = 0.4;
-  }
-
-  init() {
-    if (this.ambient) return;
-    this.ambient = new Audio("/ambient.mp3");
-    this.ambient.loop = true;
-    this.ambient.volume = this.ambientVol;
-
-    this.ride = new Audio("/ride.mp3");
-    this.ride.loop = false;
-    this.ride.volume = this.rideVol;
-
-    this.check = new Audio("/check.mp3");
-    this.check.volume = this.sfxVol;
-
-    this.open = new Audio("/open.mp3");
-    this.open.volume = this.sfxVol;
-
-    this.preshow = new Audio("/preshow.mp3");
-    this.preshow.loop = true;
-    this.preshow.volume = 0.15;
-  }
-
-  playAmbient() {
-    this.init();
-    if (this.muted) return;
-    this.ambient.play().catch(() => {});
-  }
-
-  stopAmbient() {
-    if (this.ambient) { this.ambient.pause(); this.ambient.currentTime = 0; }
-  }
-
-  fadeAmbient(targetVol, duration = 1000) {
-    if (!this.ambient) return;
-    const startVol = this.ambient.volume;
-    const diff = targetVol - startVol;
-    const steps = 20;
-    const stepTime = duration / steps;
-    let step = 0;
-    const iv = setInterval(() => {
-      step++;
-      this.ambient.volume = Math.max(0, Math.min(1, startVol + (diff * step / steps)));
-      if (step >= steps) clearInterval(iv);
-    }, stepTime);
-  }
-
-  playCheck() {
-    this.init();
-    if (this.muted) return;
-    this.check.currentTime = 0;
-    this.check.play().catch(() => {});
-  }
-
-  playOpen() {
-    this.init();
-    if (this.muted) return;
-    this.open.currentTime = 0;
-    this.open.play().catch(() => {});
-  }
-
-  playRide() {
-    this.init();
-    if (this.muted) return;
-    if (!this.ride.paused && this.ride.currentTime > 0) return;
-    this.ride.currentTime = 0;
-    this.fadeAmbient(0.08, 800);
-    this.ride.play().catch(() => {});
-  }
-
-  stopRide() {
-    if (this.ride) { this.ride.pause(); this.ride.currentTime = 0; }
-    this.fadeAmbient(this.ambientVol, 800);
-  }
-
-  toggleMute() {
-    this.muted = !this.muted;
-    const vol = this.muted ? 0 : 1;
-    if (this.ambient) this.ambient.volume = this.muted ? 0 : this.ambientVol;
-    if (this.ride) this.ride.volume = this.muted ? 0 : this.rideVol;
-    if (this.check) this.check.volume = this.muted ? 0 : this.sfxVol;
-    if (this.open) this.open.volume = this.muted ? 0 : this.sfxVol;
-    if (this.preshow) this.preshow.volume = this.muted ? 0 : 0.15;
-    return this.muted;
-  }
-
-  cleanup() {
-    this.stopAmbient();
-    this.stopRide();
-    if (this.preshow) { this.preshow.pause(); this.preshow.currentTime = 0; }
-  }
-}
-
-const audioMgr = new AudioManager();
-
-// ═══════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════
-let _gid = 0;
-const mkGroup = (max) => ({ id: `g${++_gid}`, size: Math.floor(Math.random() * max) + 1, ts: Date.now() });
-const mkSeats = () => { const s = {}; GK.forEach(k => { s[k] = GATES[k].rows.map(c => ({ capacity: c, filled: 0 })) }); return s; };
-const fmt = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`; };
-const seatsFilled = (seats) => GK.reduce((t, k) => t + seats[k].reduce((a, r) => a + r.filled, 0), 0);
-const getStars = (pct) => pct >= 97 ? 5 : pct >= 93 ? 4 : pct >= 85 ? 3 : pct >= 70 ? 2 : 1;
+// Lazy-load the Three.js viewport so the heavy 3D dependency is split into its
+// own chunk and fetched on demand (keeps the initial bundle small).
+const Scene3D = lazy(() => import("./Scene3D.jsx"));
 
 // ═══════════════════════════════════════
 // INTERLOCKS (show-control safety gate)
@@ -208,140 +35,6 @@ const checkInterlock = (theater, isActive, sel, splitting) => {
   const seatCheck = filled > 0; // placement is atomic, so any seated row is checked
   return { ready: gatesClosed && seatCheck, gatesClosed, seatCheck, filled };
 };
-
-// ═══════════════════════════════════════
-// FLOATING CLOUDS COMPONENT
-// ═══════════════════════════════════════
-function FloatingClouds({ count = 6, opacity = 0.06, inFlight = false }) {
-  const clouds = useMemo(() =>
-    Array.from({ length: count }, (_, i) => ({
-      id: i,
-      top: `${10 + (i * 67 + 23) % 80}%`,
-      size: 60 + (i * 37) % 120,
-      duration: 35 + (i * 13) % 30,
-      delay: -(i * 7) % 40,
-      flipY: i % 2 === 0,
-    })), [count]);
-
-  return (
-    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 0 }}>
-      {clouds.map(c => (
-        <img
-          key={c.id}
-          src="/cloud.png"
-          alt=""
-          style={{
-            position: "absolute",
-            top: c.top,
-            width: c.size,
-            height: "auto",
-            "--cloud-op": inFlight ? opacity * 4 : opacity,
-            "--cloud-scale": c.flipY ? -1 : 1,
-            animation: `cloudDrift ${c.duration}s linear ${c.delay}s infinite`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════
-// ANIMATED GUEST DOTS (inspired by Sim.js peeps)
-// ═══════════════════════════════════════
-function GuestDots({ guests = [], gateColor = "#fff" }) {
-  return (
-    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}>
-      {guests.map((g, i) => (
-        <div
-          key={g.id || i}
-          style={{
-            position: "absolute",
-            left: `${g.x}%`,
-            top: `${g.y}%`,
-            width: 4,
-            height: 4,
-            borderRadius: "50%",
-            background: gateColor,
-            boxShadow: `0 0 4px ${gateColor}80`,
-            opacity: 0.8,
-            transition: "left 0.6s ease-out, top 0.6s ease-out, opacity 0.4s",
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════
-// RIDE VEHICLE SVG
-// ═══════════════════════════════════════
-function RideVehicle({ phase = "docked", progress = 0, pct = 0 }) {
-  const liftAngle = phase === "flying" ? -15 + Math.sin(progress * Math.PI * 2) * 3 : 0;
-  const liftY = phase === "flying" ? -20 : phase === "lifting" ? -10 * progress : 0;
-
-  return (
-    <svg viewBox="0 0 200 80" width="100%" style={{ maxWidth: 280, display: "block", margin: "0 auto" }}>
-      <defs>
-        <linearGradient id="vg" x1="0" y1="0" x2="200" y2="0" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#4da6ff" stopOpacity=".3" />
-          <stop offset="50%" stopColor="#ffb347" stopOpacity=".5" />
-          <stop offset="100%" stopColor="#5ce0b8" stopOpacity=".3" />
-        </linearGradient>
-        <linearGradient id="screenGlow" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={phase === "flying" ? "#87ceeb" : "#1a1a3a"} />
-          <stop offset="100%" stopColor={phase === "flying" ? "#3a7fcf" : "#0a0a20"} />
-        </linearGradient>
-      </defs>
-
-      {/* Screen dome */}
-      <path d="M10 65 Q100 -10 190 65" fill="url(#screenGlow)" opacity={phase === "flying" ? 0.6 : 0.15} stroke="url(#vg)" strokeWidth="1" />
-
-      {/* Vehicle arm */}
-      <g transform={`translate(100, 70) rotate(${liftAngle}) translate(0, ${liftY})`}>
-        {/* Arm */}
-        <line x1="0" y1="0" x2="0" y2="-25" stroke="rgba(255,255,255,.2)" strokeWidth="2" />
-        {/* Row bar */}
-        <rect x="-70" y="-30" width="140" height="6" rx="3" fill="rgba(255,255,255,.1)" stroke="url(#vg)" strokeWidth="0.5" />
-        {/* Seats */}
-        {Array.from({ length: 10 }).map((_, i) => {
-          const filled = i < Math.round(pct / 10);
-          return (
-            <rect
-              key={i}
-              x={-65 + i * 14}
-              y={-28}
-              width="10"
-              height="3"
-              rx="1"
-              fill={filled ? (i < 4 ? "#4da6ff" : i < 7 ? "#ffb347" : "#5ce0b8") : "rgba(255,255,255,.06)"}
-              opacity={filled ? 0.8 : 0.3}
-            />
-          );
-        })}
-        {/* Dangling feet */}
-        {phase === "flying" && Array.from({ length: 10 }).map((_, i) => {
-          const filled = i < Math.round(pct / 10);
-          if (!filled) return null;
-          return (
-            <g key={`f${i}`}>
-              <line
-                x1={-60 + i * 14} y1={-24} x2={-60 + i * 14 + Math.sin(progress * 6 + i) * 1.5} y2={-16}
-                stroke="rgba(255,255,255,.15)" strokeWidth="1" strokeLinecap="round"
-              />
-              <line
-                x1={-56 + i * 14} y1={-24} x2={-56 + i * 14 + Math.sin(progress * 6 + i + 1) * 1.5} y2={-16}
-                stroke="rgba(255,255,255,.15)" strokeWidth="1" strokeLinecap="round"
-              />
-            </g>
-          );
-        })}
-      </g>
-
-      {/* Floor/base */}
-      <line x1="5" y1="72" x2="195" y2="72" stroke="rgba(255,255,255,.08)" strokeWidth="1" />
-    </svg>
-  );
-}
 
 // ═══════════════════════════════════════
 // MAIN COMPONENT
@@ -610,7 +303,7 @@ export default function SoarinOps() {
 
   // ─── START GAME ───
   const startGame = (d) => {
-    _gid = 0;
+    resetGroupIds();
     getCtx(); // unlock audio context on user interaction
     setDiff(d); setRunning(true); setPaused(false); setElapsed(0);
     setSbQueue(Array.from({ length: 8 }, () => mkGroup(DIFFS[d].groupMax)));
@@ -1160,7 +853,9 @@ export default function SoarinOps() {
               border: "1px solid rgba(255,255,255,.06)",
               background: "#06060f",
             }}>
-              <Scene3D theaters={theaters} activeT={activeT} running={running} paused={paused} />
+              <Suspense fallback={<div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, letterSpacing: 2, color: "rgba(255,255,255,.25)" }}>LOADING 3D VIEW…</div>}>
+                <Scene3D theaters={theaters} activeT={activeT} running={running} paused={paused} />
+              </Suspense>
             </div>
             {/* Theater tabs */}
             <div style={{ display: "flex", gap: 5, marginBottom: 6, flexShrink: 0 }}>
