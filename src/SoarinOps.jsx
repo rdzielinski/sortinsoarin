@@ -14,6 +14,7 @@ import {
 } from "./gameConfig.js";
 import { SFX, getCtx, audioMgr } from "./audio.js";
 import { FloatingClouds, RideVehicle } from "./sceneBits.jsx";
+import PlanView from "./PlanView.jsx";
 
 // Lazy-load the Three.js viewport so the heavy 3D dependency is split into its
 // own chunk and fetched on demand (keeps the initial bundle small).
@@ -95,6 +96,7 @@ export default function SoarinOps() {
   const [occSum, setOccSum] = useState(0);       // Σ occupancy% across dispatches (→ avg)
   const [eventLog, setEventLog] = useState([]);  // RSS cue/fault log
   const [showReport, setShowReport] = useState(false);
+  const [viewMode, setViewMode] = useState("plan"); // 'plan' (top-down) | '3d'
 
   // Refs mirror live state so the single game-loop interval can read fresh
   // values + auto-dispatch without a second clock or stale closures.
@@ -1025,16 +1027,31 @@ export default function SoarinOps() {
 
           {/* CENTER: ACTIVE THEATER */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "auto", overscrollBehavior: "none", userSelect: "none" }}>
-            {/* 3D Viewport */}
+            {/* Viewport — top-down PLAN (sim layout) or 3D */}
             <div style={{
               height: "clamp(140px, 22vh, 220px)", marginBottom: 6, flexShrink: 0,
-              borderRadius: 10, overflow: "hidden",
+              borderRadius: 10, overflow: "hidden", position: "relative",
               border: "1px solid rgba(255,255,255,.06)",
               background: "#06060f",
             }}>
-              <Suspense fallback={<div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, letterSpacing: 2, color: "rgba(255,255,255,.25)" }}>LOADING 3D VIEW…</div>}>
-                <Scene3D theaters={theaters} activeT={activeT} running={running} paused={paused} />
-              </Suspense>
+              {viewMode === "plan"
+                ? <PlanView theaters={theaters} activeT={activeT} sbQueue={sbQueue.length} llQueue={llQueue.length} />
+                : (
+                  <Suspense fallback={<div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, letterSpacing: 2, color: "rgba(255,255,255,.25)" }}>LOADING 3D VIEW…</div>}>
+                    <Scene3D theaters={theaters} activeT={activeT} running={running} paused={paused} />
+                  </Suspense>
+                )}
+              {/* PLAN / 3D toggle */}
+              <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 2, background: "rgba(6,8,16,.7)", borderRadius: 6, padding: 2, border: "1px solid rgba(255,255,255,.06)" }}>
+                {["plan", "3d"].map(m => (
+                  <div key={m} onClick={() => { setViewMode(m); SFX.tabSwitch(); }}
+                    style={{
+                      cursor: "pointer", fontSize: 8, fontWeight: 800, letterSpacing: 1, padding: "2px 7px", borderRadius: 4,
+                      background: viewMode === m ? "rgba(255,207,74,.15)" : "transparent",
+                      color: viewMode === m ? "#ffcf4a" : "rgba(255,255,255,.4)",
+                    }}>{m === "plan" ? "PLAN" : "3D"}</div>
+                ))}
+              </div>
             </div>
             {/* Theater tabs */}
             <div style={{ display: "flex", gap: 5, marginBottom: 6, flexShrink: 0 }}>
