@@ -1,4 +1,4 @@
-import { GATES, GK, TOTAL, seatsFilled } from "./gameConfig.js";
+import { GATES, GK, CONCOURSES, TOTAL, seatsFilled } from "./gameConfig.js";
 
 // Top-down "simulator-style" overview of the three theaters, in the spirit of
 // the cast-member sim floor plan: blue domes, light gate carriages with seat
@@ -73,8 +73,8 @@ function Theater({ th, i, isActive }) {
       {/* projector spine marker */}
       <path d={`M ${cx - 3} 36 L ${cx} 32 L ${cx + 3} 36 Z`} fill="#b3392c" />
 
-      {/* theater id + occupancy */}
-      <text x={x + 6} y={16} fontSize={6} fontWeight="800" fill="rgba(255,255,255,.75)">T{i + 1}</text>
+      {/* concourse id + occupancy */}
+      <text x={x + 6} y={16} fontSize={5.5} fontWeight="800" fill="rgba(255,255,255,.75)">CONC {CONCOURSES[i]}</text>
       <text x={x + REGION_W - 6} y={16} fontSize={6} fontWeight="800" fontFamily="monospace" textAnchor="end" fill={occColor(pct)}>{pct}%</text>
 
       {/* gate carriages */}
@@ -94,7 +94,7 @@ function Theater({ th, i, isActive }) {
 export default function PlanView({ theaters = [], activeT = 0, sbQueue = 0, llQueue = 0 }) {
   return (
     <svg viewBox="0 0 360 130" width="100%" height="100%" preserveAspectRatio="xMidYMid meet"
-      role="img" aria-label="Top-down plan of the three theaters" style={{ display: "block" }}>
+      role="img" aria-label="Top-down plan of the three concourses" style={{ display: "block" }}>
       <defs>
         <radialGradient id="planDome" cx="38%" cy="32%" r="75%">
           <stop offset="0%" stopColor="#b9c6fb" />

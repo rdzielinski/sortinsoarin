@@ -8,7 +8,7 @@ import {
 } from "./showControl.js";
 import ShowClock from "./ShowClock.jsx";
 import {
-  GATES, TOTAL, GK, ROW_NAMES, RIDE_DURATION, UNLOAD_DURATION,
+  GATES, TOTAL, GK, CONCOURSES, ROW_NAMES, RIDE_DURATION, UNLOAD_DURATION,
   DIFFS, ACHIEVEMENTS,
   resetGroupIds, mkGroup, mkSeats, fmt, seatsFilled, getStars,
 } from "./gameConfig.js";
@@ -375,15 +375,15 @@ export default function SoarinOps() {
       events.forEach(ev => {
         if (ev.type === "dispatch") {
           applyFlightScore(ev.pct, ev.loadTime, ridingCount === THEATER_COUNT, ev.ready, true);
-          logEvent("dispatch", ev.i, `T${ev.i + 1} DISPATCH · ${ev.pct}% ${"★".repeat(getStars(ev.pct))}`);
+          logEvent("dispatch", ev.i, `Conc ${CONCOURSES[ev.i]} DISPATCH · ${ev.pct}% ${"★".repeat(getStars(ev.pct))}`);
         } else if (ev.type === "hold") {
           streakRef.current = 0; setStreak(0);
           greenStreakRef.current = 0;
           faultsRef.current += 1; setFaults(faultsRef.current);
           SFX.hold();
-          logEvent("hold", ev.i, `T${ev.i + 1} HELD · ${ev.reason}`);
+          logEvent("hold", ev.i, `Conc ${CONCOURSES[ev.i]} HELD · ${ev.reason}`);
         } else if (ev.type === "online") {
-          logEvent("online", ev.i, `T${ev.i + 1} ONLINE`);
+          logEvent("online", ev.i, `Conc ${CONCOURSES[ev.i]} ONLINE`);
         }
       });
     }, 100);
@@ -442,7 +442,7 @@ export default function SoarinOps() {
   // ─── MERGE ───
   const releaseSB = () => {
     if (paused) return;
-    if (showMode && curTheater.status !== "loading") { toast("Theater not in its load window", "error"); return; }
+    if (showMode && curTheater.status !== "loading") { toast("Concourse not in its load window", "error"); return; }
     if (!showMode && (curTheater.status === "riding" || curTheater.status === "unloading")) return;
     if (sbQueue.length === 0) { toast("Standby queue empty", "error"); return; }
     const batch = sbQueue.slice(0, 3);
@@ -452,12 +452,12 @@ export default function SoarinOps() {
     } else {
       setTheaters(p => p.map((th, i) => i === activeT ? { ...th, holding: [...th.holding, ...batch] } : th));
     }
-    SFX.merge(); toast(`+${batch.length} groups from Standby → Theater ${activeT + 1}`, "success");
+    SFX.merge(); toast(`+${batch.length} groups from Standby → Concourse ${CONCOURSES[activeT]}`, "success");
   };
 
   const releaseLL = () => {
     if (paused) return;
-    if (showMode && curTheater.status !== "loading") { toast("Theater not in its load window", "error"); return; }
+    if (showMode && curTheater.status !== "loading") { toast("Concourse not in its load window", "error"); return; }
     if (!showMode && (curTheater.status === "riding" || curTheater.status === "unloading")) return;
     if (llQueue.length === 0) { toast("Lightning Lane empty", "error"); return; }
     const batch = llQueue.slice(0, 2);
@@ -467,7 +467,7 @@ export default function SoarinOps() {
     } else {
       setTheaters(p => p.map((th, i) => i === activeT ? { ...th, holding: [...th.holding, ...batch] } : th));
     }
-    SFX.merge(); toast(`+${batch.length} groups from LL → Theater ${activeT + 1}`, "success");
+    SFX.merge(); toast(`+${batch.length} groups from LL → Concourse ${CONCOURSES[activeT]}`, "success");
   };
 
   // ─── SELECT ───
@@ -671,12 +671,12 @@ export default function SoarinOps() {
             marginTop: 8, padding: "4px 18px", borderRadius: 11,
             background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)",
           }}>
-            <span style={{ fontFamily: "monospace", fontSize: 9, color: "rgba(140,184,224,.45)", letterSpacing: 2.5 }}>3-THEATER MODE</span>
+            <span style={{ fontFamily: "monospace", fontSize: 9, color: "rgba(140,184,224,.45)", letterSpacing: 2.5 }}>3-CONCOURSE MODE</span>
           </div>
         </div>
 
         <div style={{ fontSize: 12, color: "rgba(255,255,255,.28)", letterSpacing: 2.5, marginBottom: 18, textAlign: "center", maxWidth: 470, lineHeight: 1.8, fontWeight: 500 }}>
-          Ride/show supervisor (RSS) console — run three theaters on one
+          Ride/show supervisor (RSS) console — run three concourses on one
           <br />show clock: load each gate during its window, hit the staggered
           <br />dispatch cue every 28s, and keep every interlock green.
         </div>
@@ -757,7 +757,7 @@ export default function SoarinOps() {
         <div style={{ fontSize: 10, color: "rgba(255,255,255,.16)", textAlign: "center", lineHeight: 2, letterSpacing: 0.5 }}>
           <span style={{ color: "rgba(255,255,255,.3)" }}>Q</span> release standby
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>L</span> release LL
-          {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>1/2/3</span> switch theater
+          {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>1/2/3</span> switch concourse
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>D</span> dispatch
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>S</span> split
           {" · "}<span style={{ color: "rgba(255,255,255,.3)" }}>Y</span> sync mode
@@ -1070,7 +1070,7 @@ export default function SoarinOps() {
                     }}>
                     {th.status === "riding" && <div style={{ position: "absolute", inset: 0, background: `linear-gradient(90deg,transparent,${statusColor.riding}08,transparent)`, animation: "rideGlow 2s infinite" }} />}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", position: "relative" }}>
-                      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5 }}>T{i + 1}</span>
+                      <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.5 }}>CONC {CONCOURSES[i]}</span>
                       <span style={{ fontSize: 8, fontWeight: 700, color: statusColor[th.status], letterSpacing: 1 }}>{statusLabel[th.status]}</span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 3, position: "relative" }}>
@@ -1109,7 +1109,7 @@ export default function SoarinOps() {
                     {Math.ceil(curTheater.rideTimer)}s
                   </div>
                   <div style={{ fontSize: 11, color: "rgba(255,255,255,.25)", marginTop: 6 }}>
-                    Theater {activeT + 1} · {curTheater.lastPct}% occupancy · {"★".repeat(getStars(curTheater.lastPct))}{"☆".repeat(5 - getStars(curTheater.lastPct))}
+                    Concourse {CONCOURSES[activeT]} · {curTheater.lastPct}% occupancy · {"★".repeat(getStars(curTheater.lastPct))}{"☆".repeat(5 - getStars(curTheater.lastPct))}
                   </div>
                   <RideVehicle phase="flying" progress={rideProgress} pct={curTheater.lastPct} />
                 </div>
@@ -1126,7 +1126,7 @@ export default function SoarinOps() {
                 borderRadius: 14, border: "1px solid rgba(255,255,255,.04)",
               }}>
                 <RideVehicle phase="docked" progress={0} pct={0} />
-                <div style={{ fontSize: 14, color: "rgba(255,255,255,.25)", letterSpacing: 2.5, fontWeight: 700, marginTop: 8 }}>THEATER {activeT + 1} · STANDBY</div>
+                <div style={{ fontSize: 14, color: "rgba(255,255,255,.25)", letterSpacing: 2.5, fontWeight: 700, marginTop: 8 }}>CONCOURSE {CONCOURSES[activeT]} · STANDBY</div>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,.18)", marginTop: 6 }}>
                   Comes online in {curShow ? Math.ceil(curShow.phaseRemaining) : 0}s — the show clock staggers theater open times
                 </div>
@@ -1148,7 +1148,7 @@ export default function SoarinOps() {
                 borderRadius: 14, border: "1px solid rgba(255,255,255,.04)",
               }}>
                 <RideVehicle phase="docked" progress={0} pct={0} />
-                <div style={{ fontSize: 14, color: "rgba(255,255,255,.2)", letterSpacing: 2.5, fontWeight: 700, marginTop: 8 }}>THEATER {activeT + 1} READY</div>
+                <div style={{ fontSize: 14, color: "rgba(255,255,255,.2)", letterSpacing: 2.5, fontWeight: 700, marginTop: 8 }}>CONCOURSE {CONCOURSES[activeT]} READY</div>
                 <div style={{ fontSize: 11, color: "rgba(255,255,255,.12)", marginTop: 6 }}>Release groups from Standby or Lightning Lane to begin loading</div>
               </div>
             ) : (
@@ -1236,7 +1236,7 @@ export default function SoarinOps() {
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                             <div style={{ width: 5, height: 5, borderRadius: "50%", background: cfg.color, boxShadow: `0 0 6px ${cfg.color}60` }} />
-                            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2 }}>SEC {cfg.label}</span>
+                            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2 }}>GATE {cfg.label}</span>
                           </div>
                           <span style={{ fontSize: 9, fontFamily: "monospace", color: "rgba(255,255,255,.25)" }}>{gF}/{gC}</span>
                         </div>
@@ -1368,10 +1368,10 @@ export default function SoarinOps() {
               {[
                 ["Q", "Release Standby batch"],
                 ["L", "Release Lightning Lane batch"],
-                ["1 / 2 / 3", "Switch theater (no group selected)"],
+                ["1 / 2 / 3", "Switch concourse (no group selected)"],
                 ["4–9", "Select group from holding"],
                 ["S", "Toggle split mode"],
-                ["D", "Dispatch current theater (free-play)"],
+                ["D", "Dispatch current concourse (free-play)"],
                 ["Y", "Toggle Synchronized Show Mode"],
                 ["I", "Toggle STRICT interlocks (Show Mode)"],
                 ["M", "Toggle audio mute"],

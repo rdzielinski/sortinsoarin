@@ -1,10 +1,10 @@
 # Sortin' Soarin' — Ride/Show Operations Simulator
 
 A browser-based **ride/show-supervisor (RSS) console** themed on a hang-gliding
-flight-theater attraction. You run three theaters at once: route guests from the
-Standby and Lightning Lane queues, load each theater's gates and rows, keep the
-interlocks green, and dispatch flights — scored on occupancy, throughput, and a
-streak/achievement system.
+flight-theater attraction. You run three concourses (A/B/C) at once: route guests
+from the Standby and Lightning Lane queues, load each concourse's gates (A/B/C)
+and rows, keep the interlocks green, and dispatch flights — scored on occupancy,
+throughput, and a streak/achievement system.
 
 Built with **React 19 + Vite 6** and a **Three.js** 3D viewport. Plain JS/JSX,
 no TypeScript, no state-management library.
@@ -23,24 +23,24 @@ npm test         # timing-model tests (node, no deps)
 
 The headline feature is a **show-control timing layer** that turns free-play
 sorting into a synchronized, clock-driven show. A single **show clock** drives
-all three theaters through the same fixed phase cycle — **load → lift → fly →
-unload** (29 / 6 / 45 / 4 s, an 84 s cycle) — but the theaters are **staggered by
-one dispatch interval** so their cycles never line up. With three theaters on an
-84 s cycle the global **dispatch interval is 28 s**: a flight launches like
-clockwork every 28 seconds, evenly spaced (Theater 1 at +29 s, Theater 2 at
-+57 s, Theater 3 at +85 s, then repeating), so at any instant exactly one theater
-is typically mid-load while the others are lifting, flying, or unloading. Each
-theater's **dispatch moment** is its `load → lift` transition, and every dispatch
-is gated by an **interlock** — a seat check (restraints/rows seated) plus closed
-gates (no group mid-placement). Interlocks run in one of two modes (toggle, key
-`I`):
+all three concourses through the same fixed phase cycle — **load → lift → fly →
+unload** (29 / 6 / 45 / 4 s, an 84 s cycle) — but the concourses are **staggered
+by one dispatch interval** so their cycles never line up. With three concourses
+on an 84 s cycle the global **dispatch interval is 28 s**: a flight launches like
+clockwork every 28 seconds, evenly spaced (Concourse A at +29 s, Concourse B at
++57 s, Concourse C at +85 s, then repeating), so at any instant exactly one
+concourse is typically mid-load while the others are lifting, flying, or
+unloading. Each concourse's **dispatch moment** is its `load → lift` transition,
+and every dispatch is gated by an **interlock** — a seat check (restraints/rows
+seated) plus closed gates (no group mid-placement). Interlocks run in one of two
+modes (toggle, key `I`):
 
-- **ADVISORY** (default) — the per-theater status dot reads green (ready) /
+- **ADVISORY** (default) — the per-concourse status dot reads green (ready) /
   amber (loading) / red (held), but the clock dispatches on cue regardless.
-- **STRICT** — dispatch is **gated**. If a theater's interlock isn't clear at
+- **STRICT** — dispatch is **gated**. If a concourse's interlock isn't clear at
   its cue it is **HELD** (faults, breaks the streak), and it dispatches **late**
   the moment the interlock clears, then resumes its now-shifted cadence. This is
-  modelled as a per-theater clock shift, so ADVISORY remains the exact
+  modelled as a per-concourse clock shift, so ADVISORY remains the exact
   deterministic global clock and STRICT layers the hold/recovery on top.
 
 The whole model is deterministic and re-derives from one tunable
@@ -58,15 +58,15 @@ A **Synchronized Show Mode** toggle (default **ON**, key `Y`, plus a switch on t
 menu and in the header) selects the behavior:
 
 - **ON** — the clock-driven staggered cadence above. The player's job is to
-  **load each theater during its load window**; dispatch is automatic on the
+  **load each concourse during its load window**; dispatch is automatic on the
   cue. The **Show Clock** panel shows three staggered lanes (proportional
   load/lift/fly/unload segments, a moving playhead, an interlock dot, and
   occupancy %), plus a header with the live dispatch interval, average
-  occupancy, throughput, and a "next dispatch in X / Theater N" countdown. A
+  occupancy, throughput, and a "next dispatch in X / Concourse N" countdown. A
   **cue/fault log** records timestamped DISPATCH / HELD / ONLINE events, and
   **END SHIFT** opens a report (flights, guests, avg occupancy, throughput vs.
   the theoretical max + efficiency %, interlock holds, star rating).
-- **OFF** — the original free-play game: fill theaters and dispatch manually
+- **OFF** — the original free-play game: fill concourses and dispatch manually
   (`D`) whenever you like.
 
 Earned achievements and best-shift stats persist across reloads
@@ -76,10 +76,13 @@ dispatches), and **Clean Shift** (a 3 min+ shift with zero holds).
 
 ## Controls
 
-`Q` release Standby · `L` release Lightning Lane · `1/2/3` switch theater ·
+`Q` release Standby · `L` release Lightning Lane · `1/2/3` switch concourse ·
 `4–9`/`0` select group · `S` split · `D` dispatch (free-play) ·
 `Y` toggle Synchronized Show Mode · `I` toggle STRICT interlocks ·
 `M` mute · `Space` pause · `Esc` deselect.
+
+The center viewport toggles a top-down **PLAN** of the three concourses (sim-style
+floor plan with domes, gate carriages, live seats) and the **3D** view.
 
 ## Project layout
 
@@ -87,9 +90,10 @@ The shipped app is `index.html` + `src/` + `public/`:
 
 | File | Role |
 | --- | --- |
-| `src/SoarinOps.jsx` | Main game: queues, theaters, loading, scoring, interlock gating, single game loop |
+| `src/SoarinOps.jsx` | Main game: queues, concourses, loading, scoring, interlock gating, single game loop |
 | `src/showControl.js` | Show-control timing model — constants + `theaterShowState` / `theaterPhase` / `nextDispatch` (single source of truth) |
-| `src/ShowClock.jsx` | Show Clock panel — staggered theater lanes, phase segments, playhead, interlock dots |
+| `src/ShowClock.jsx` | Show Clock panel — staggered concourse lanes, phase segments, playhead, interlock dots |
+| `src/PlanView.jsx` | Top-down PLAN — sim-style floor plan of the three concourses, wired to live seats |
 | `src/gameConfig.js` | Game constants, difficulties, achievements, seat/group helpers |
 | `src/audio.js` | Web Audio SFX + ambient/ride `AudioManager` |
 | `src/sceneBits.jsx` | Presentational SVG bits (clouds, ride vehicle) |

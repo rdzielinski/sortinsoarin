@@ -8,6 +8,7 @@ import {
   nextDispatch,
   cycleSegments,
 } from "./showControl.js";
+import { CONCOURSES } from "./gameConfig.js";
 
 const SEGMENTS = cycleSegments();
 const fmtNum = (n) => (Number.isInteger(n) ? `${n}` : n.toFixed(1));
@@ -29,7 +30,7 @@ function Lane({ index, lane }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, opacity: isPreshow ? 0.55 : 1 }}>
       {/* Left: label + interlock dot */}
-      <div style={{ width: 84, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ width: 96, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
         <span
           title={lane.held ? "Interlock fault — dispatch held" : "Interlock (seat check + gates closed)"}
           style={{
@@ -37,7 +38,7 @@ function Lane({ index, lane }) {
             boxShadow: `0 0 6px ${dot}`, flexShrink: 0, transition: "background .2s",
           }}
         />
-        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: "rgba(255,255,255,.7)" }}>T{index + 1}</span>
+        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, color: "rgba(255,255,255,.7)" }}>CONC {CONCOURSES[index]}</span>
         <span style={{ fontSize: 7, fontWeight: 700, letterSpacing: 0.5, color: lane.held ? "#ef4444" : "rgba(255,255,255,.3)" }}>{phaseLabel}</span>
       </div>
 
@@ -130,7 +131,7 @@ export default function ShowClock({ now = 0, lanes = [], throughput = null, avgO
           )}
           <span style={{ fontSize: 9, color: "rgba(255,255,255,.4)" }}>
             Next{" "}
-            <span style={{ fontWeight: 800, color: "#fff" }}>T{nd.theater + 1}</span>{" in "}
+            <span style={{ fontWeight: 800, color: "#fff" }}>Conc {CONCOURSES[nd.theater]}</span>{" in "}
             <span style={{ fontFamily: "monospace", fontWeight: 800, color: "#ffb347" }}>{Math.ceil(nd.inSeconds)}s</span>
           </span>
         </div>

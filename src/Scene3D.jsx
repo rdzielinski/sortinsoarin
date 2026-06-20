@@ -215,8 +215,8 @@ function buildTheater(scene, ti, mats) {
   screenMesh.rotation.y = Math.PI;
   scene.add(screenMesh);
 
-  // Theater label
-  const tLabel = mkLabel(`Theater ${'ABC'[ti]}`, ['#4da6ff','#ffb347','#5ce0b8'][ti]);
+  // Concourse label
+  const tLabel = mkLabel(`Concourse ${'ABC'[ti]}`, ['#4da6ff','#ffb347','#5ce0b8'][ti]);
   tLabel.position.set(cx, wallH + 1.5, cz);
   scene.add(tLabel);
 

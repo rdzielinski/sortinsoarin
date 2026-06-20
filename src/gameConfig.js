@@ -7,7 +7,8 @@ export const GATES = {
   C: { rows: [10, 10, 7], label: "C", color: "#5ce0b8" },
 };
 export const TOTAL = 87;
-export const GK = ["A", "B", "C"];
+export const GK = ["A", "B", "C"];                 // gate keys (sections within a concourse)
+export const CONCOURSES = ["A", "B", "C"];         // concourse labels (the three theaters)
 export const ROW_NAMES = ["Row 1", "Row 2", "Row 3"];
 export const RIDE_DURATION = 45;
 export const UNLOAD_DURATION = 4;
@@ -19,9 +20,9 @@ export const DIFFS = {
 };
 
 export const ACHIEVEMENTS = [
-  { id: "perfect", icon: "✦", title: "Perfect Flight", desc: "100% occupancy on a theater" },
+  { id: "perfect", icon: "✦", title: "Perfect Flight", desc: "100% occupancy on a concourse" },
   { id: "speed", icon: "⚡", title: "Speed Demon", desc: "Dispatch in under 25 seconds" },
-  { id: "triple", icon: "🎯", title: "Triple Dispatch", desc: "All 3 theaters riding at once" },
+  { id: "triple", icon: "🎯", title: "Triple Dispatch", desc: "All 3 concourses riding at once" },
   { id: "split", icon: "✂", title: "Split Decision", desc: "Use the split mechanic" },
   { id: "ten", icon: "👑", title: "CM of the Month", desc: "Dispatch 10 flights total" },
   { id: "twenty", icon: "💎", title: "Veteran Operator", desc: "Dispatch 20 flights total" },
