@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Scene3D from "./Scene3D.jsx";
+import PlanMap from "./PlanMap.jsx";
 
 // ═══════════════════════════════════════
 // CONFIG
@@ -321,6 +322,21 @@ function RideVehicle({ phase = "docked", progress = 0, pct = 0 }) {
 // ═══════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════
+function ViewToggle({ viewMode, setViewMode }) {
+  return (
+    <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 2, background: "rgba(0,0,0,.55)", borderRadius: 6, padding: 2, zIndex: 2 }}>
+      {[["map", "MAP"], ["3d", "3D"]].map(([k, l]) => (
+        <button key={k} onClick={() => setViewMode(k)} style={{
+          border: 0, borderRadius: 4, padding: "3px 8px", cursor: "pointer",
+          fontSize: 9, fontWeight: 800, letterSpacing: 1.2,
+          background: viewMode === k ? "rgba(255,255,255,.16)" : "transparent",
+          color: viewMode === k ? "#fff" : "rgba(255,255,255,.45)",
+        }}>{l}</button>
+      ))}
+    </div>
+  );
+}
+
 export default function SoarinOps() {
   const [diff, setDiff] = useState(null);
   const [sbQueue, setSbQueue] = useState([]);
@@ -352,6 +368,9 @@ export default function SoarinOps() {
   const [rideProgress, setRideProgress] = useState(0);
   const [dispatchFlash, setDispatchFlash] = useState(false);
   const [menuHovered, setMenuHovered] = useState(null);
+  const selectTheater = useCallback((i) => { if (i !== activeT) { setActiveT(i); setSel(null); setSplitting(false); SFX.tabSwitch(); } }, [activeT]);
+  const [viewMode, setViewMode] = useState(() => { try { return localStorage.getItem("soarin.viewMode") || "map"; } catch { return "map"; } });
+  useEffect(() => { try { localStorage.setItem("soarin.viewMode", viewMode); } catch { /* storage unavailable */ } }, [viewMode]);
 
   const mt = useRef(null);
   const toast = useCallback((t, type = "info") => {
@@ -778,7 +797,7 @@ export default function SoarinOps() {
         </div>
       )}
 
-      <div style={{ position: "relative", zIndex: 1, maxWidth: 1200, margin: "0 auto", padding: "10px 12px 20px", height: "100vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ position: "relative", zIndex: 1, maxWidth: 1600, margin: "0 auto", padding: "10px 12px 20px", height: "100vh", display: "flex", flexDirection: "column" }}>
 
         {/* HEADER */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexShrink: 0 }}>
@@ -928,15 +947,6 @@ export default function SoarinOps() {
 
           {/* CENTER: ACTIVE THEATER */}
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "auto", overscrollBehavior: "none", userSelect: "none" }}>
-            {/* 3D Viewport */}
-            <div style={{
-              height: "clamp(140px, 22vh, 220px)", marginBottom: 6, flexShrink: 0,
-              borderRadius: 10, overflow: "hidden",
-              border: "1px solid rgba(255,255,255,.06)",
-              background: "#06060f",
-            }}>
-              <Scene3D theaters={theaters} activeT={activeT} running={running} paused={paused} />
-            </div>
             {/* Theater tabs */}
             <div style={{ display: "flex", gap: 5, marginBottom: 6, flexShrink: 0 }}>
               {theaters.map((th, i) => {
@@ -1177,6 +1187,19 @@ export default function SoarinOps() {
               </>
             )}
           </div>
+
+          {/* RIGHT: live map or 3D model of the real Soarin' building */}
+          {(
+            <div style={{
+              width: "clamp(300px, 38vw, 600px)", height: "100%", flexShrink: 0, position: "relative",
+              borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,.06)", background: "#131e26",
+            }}>
+              {viewMode === "map"
+                ? <PlanMap theaters={theaters} activeT={activeT} sbQueue={sbQueue} llQueue={llQueue} onSelect={selectTheater} />
+                : <Scene3D theaters={theaters} activeT={activeT} sbQueue={sbQueue} llQueue={llQueue} onSelect={selectTheater} />}
+              <ViewToggle viewMode={viewMode} setViewMode={setViewMode} />
+            </div>
+          )}
         </div>
 
         {/* Keyboard help modal */}
